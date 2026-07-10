@@ -1050,29 +1050,41 @@ itself the canonical semantic domain.
 \label{sec:glance}
 
 Table~\ref{tab:instances} summarizes the framework by instantiating
-each concept in the two motivating applications.
+each concept in three settings: the two motivating applications, and
+the cost terrains of local search, developed in
+Section~\ref{sec:terrain} (the terrain column reads the terrain as
+embedded in a larger process, so that basin identity matters).
 Readers fluent in one column can use it as a dictionary for the
-other.
+others.
 
 \begin{table}[t]
-\caption{The abstract framework and its two motivating instances.}
+\caption{The abstract framework and three instances.}
 \label{tab:instances}
-\small
-\begin{tabular}{@{}lll@{}}
+\footnotesize
+\begin{tabular}{@{}llll@{}}
 \toprule
-Framework concept & Query optimization & Equality saturation \\
+Framework concept & Query optimization & Equality saturation &
+Local search \\
 \midrule
-subgoal $x$ & connected join subexpression & e-class \\
-constructor $r$ & physical join operator & e-node \\
-primitive solution & access method (scan) & childless e-node \\
-goal $\goal$ & the full query & root e-class \\
-solution $s\in\Sol(x)$ & physical plan & extractable term \\
-property $o\in O$ & canonicalized sort key & analysis fact \\
-interest $I(x)$ & interesting orders at $x$ & properties usable above $x$ \\
-label $\lambda_x(s)$ & plan's advertised orders & term's derived properties \\
-memo frontier & best plan per order bundle & term frontier per class \\
-recurrence $\widehat V$ & System~R dynamic program & property-indexed extraction \\
-equivalence $\equiv_x$ & interchangeable subplans & interchangeable terms \\
+subgoal $x$ & join subexpression & e-class & terrain vertex \\
+constructor $r$ & physical join operator & e-node & descent edge \\
+primitive solution & access method (scan) & childless e-node &
+sink (local minimum) \\
+goal $\goal$ & the full query & root e-class & start vertex $v_0$ \\
+solution $s\in\Sol(x)$ & physical plan & extractable term &
+descending walk to a sink \\
+property $o\in O$ & canonicalized sort key & analysis fact &
+basin identity \\
+interest $I(x)$ & interesting orders at $x$ &
+properties usable above $x$ & still-live basins \\
+label $\lambda_x(s)$ & plan's advertised orders &
+term's derived properties & basin reached \\
+memo frontier & best plan per order bundle &
+term frontier per class & basin frontier \\
+recurrence $\widehat V$ & System~R DP &
+property-indexed extraction & one-pass frontier union \\
+equivalence $\equiv_x$ & interchangeable subplans &
+interchangeable terms & walks to the same basin \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1449,6 +1461,81 @@ problems for which Selinger-style dynamic programming, Cascades-style
 memoization, and frontier-indexed e-graph extraction can be
 efficient.
 \end{openproblem}
+
+\subsection{Cost Terrains and Local Search}
+\label{sec:terrain}
+
+A third setting motivated this work: discrete non-convex
+optimization over a \emph{cost terrain}, as navigated by local
+search and Monte Carlo methods.
+A terrain is a finite neighborhood graph with a cost on vertices.
+Orienting each edge downhill (after contracting equal-cost plateaus)
+yields an acyclic \emph{descent graph}; its sinks are the local
+minima, and non-convexity is branching: a vertex whose descent paths
+reach two different sinks.
+Monte Carlo methods deliberately traverse a cyclic proposal graph,
+but the cycles belong to the algorithm, not the problem; the
+semantics below lives on the acyclic descent orientation.
+
+The terrain maps into the framework directly.
+Subgoals are the vertices reachable from a start vertex $v_0$; each
+descent edge $x\to y$ contributes a unary constructor $(y)\to x$;
+each sink $m$ has one primitive solution (``stop here,'' with cost
+$c(m)$); the goal is $v_0$.
+A solution of $x$ is a descending walk from $x$ to a sink, and its
+cost is the cost of the sink it reaches.
+
+\begin{remark}[Non-convexity is not width]
+\label{rem:terrain-width}
+For the standalone question---what is the best sink value reachable
+from $v_0$?---every context merely prepends a descent prefix and
+contributes nothing to cost, so \emph{all} solutions of a subgoal
+are continuation-equivalent: $w(x)=1$, and the scalar recurrence
+$V_x=\min_{x\to y}V_y$ is exact with no properties at all.
+The multi-basin structure that defeats greedy descent is invisible
+to offline memoization.
+Non-convexity obstructs \emph{irrevocable} search; it is not, by
+itself, a failure of Bellman's principle.
+\end{remark}
+
+\begin{remark}[Embedding creates width]
+\label{rem:terrain-embed}
+Sink identity becomes continuation-relevant the moment the terrain
+is embedded in a larger process: the walk continues from wherever it
+lands (a restart, a warm start, a later optimization phase, a
+composite objective).
+Take the property domain $O$ to be the sinks, with sink identity
+demanded by the enclosing goal.
+The canonical label of a vertex is then its \emph{basin frontier}:
+the Pareto-optimal pairs (sink, best cost reachable in that basin).
+The transfer map of a descent edge is union followed by dominance
+pruning---join-compositional---and the lifted recurrence specializes
+to a single reverse-topological pass,
+\[
+F(x)=\bigsqcup_{x\to y}F(y),
+\]
+computable in linear time.
+Width is the number of continuation-distinct basins: the branching
+antichains of the terrain.
+\end{remark}
+
+\begin{remark}[Three coordinate systems]
+\label{rem:terrain-coords}
+The same lift has three presentations.
+As a \emph{state} lift, memoize pairs (vertex, basin).
+As a \emph{cost} lift, replace the scalar objective by a vector with
+one coordinate per live basin, with componentwise minimum as join;
+smoothing a rugged optimization surface by adding cost dimensions,
+in the spirit of Ioannidis and Kang's analysis of query optimization
+terrains~\cite{ioannidis1991left}, is this construction.
+As a \emph{semantic} lift, label vertices by frontier bundles as in
+this paper.
+We expect these to be formally interchangeable, and the standalone
+version of the story---keeping several basins alive under
+irrevocable moves---is the determination-theoretic face of the same
+frontier (Section~\ref{sec:determination-bridge}): deferred
+commitment, not memoization.
+\end{remark}
 
 \subsection{The Mult-Egraph}
 \label{sec:multegraph}
