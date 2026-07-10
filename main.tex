@@ -1052,8 +1052,10 @@ itself the canonical semantic domain.
 Table~\ref{tab:instances} summarizes the framework by instantiating
 each concept in three settings: the two motivating applications, and
 the cost terrains of local search, developed in
-Section~\ref{sec:terrain} (the terrain column reads the terrain as
-embedded in a larger process, so that basin identity matters).
+Section~\ref{sec:terrain}.
+In the local-search column, note that terrain points are
+\emph{complete} solutions; subgoals appear in the neighborhood
+function, as the sites that local moves rewrite.
 Readers fluent in one column can use it as a dictionary for the
 others.
 
@@ -1066,25 +1068,27 @@ others.
 Framework concept & Query optimization & Equality saturation &
 Local search \\
 \midrule
-subgoal $x$ & join subexpression & e-class & terrain vertex \\
-constructor $r$ & physical join operator & e-node & descent edge \\
+subgoal $x$ & join subexpression & e-class & site of a local move \\
+constructor $r$ & physical join operator & e-node &
+piece composition (fixed by moves) \\
 primitive solution & access method (scan) & childless e-node &
-sink (local minimum) \\
-goal $\goal$ & the full query & root e-class & start vertex $v_0$ \\
+smallest swappable piece \\
+goal $\goal$ & the full query & root e-class &
+whole problem (points $=$ its solutions) \\
 solution $s\in\Sol(x)$ & physical plan & extractable term &
-descending walk to a sink \\
+swappable piece \\
 property $o\in O$ & canonicalized sort key & analysis fact &
-basin identity \\
+feature of a piece \\
 interest $I(x)$ & interesting orders at $x$ &
-properties usable above $x$ & still-live basins \\
+properties usable above $x$ & features contexts can exploit \\
 label $\lambda_x(s)$ & plan's advertised orders &
-term's derived properties & basin reached \\
+term's derived properties & the piece's features \\
 memo frontier & best plan per order bundle &
-term frontier per class & basin frontier \\
+term frontier per class & incomparable pieces (ridge sources) \\
 recurrence $\widehat V$ & System~R DP &
-property-indexed extraction & one-pass frontier union \\
+property-indexed extraction & frontier DP replacing the walk \\
 equivalence $\equiv_x$ & interchangeable subplans &
-interchangeable terms & walks to the same basin \\
+interchangeable terms & safely swappable pieces \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1468,73 +1472,104 @@ efficient.
 A third setting motivated this work: discrete non-convex
 optimization over a \emph{cost terrain}, as navigated by local
 search and Monte Carlo methods.
-A terrain is a finite neighborhood graph with a cost on vertices.
-Orienting each edge downhill (after contracting equal-cost plateaus)
-yields an acyclic \emph{descent graph}; its sinks are the local
-minima, and non-convexity is branching: a vertex whose descent paths
-reach two different sinks.
-Monte Carlo methods deliberately traverse a cyclic proposal graph,
-but the cycles belong to the algorithm, not the problem; the
-semantics below lives on the acyclic descent orientation.
+A terrain is a graph whose points are \emph{complete} solutions,
+with an edge between two points when a single local move transforms
+one into the other, and with the objective as elevation.
+In the vocabulary of this paper, the points are $\Sol(\goal)$, and
+the moves are \emph{context-preserving substitutions}: writing the
+current point as $C[s]$ for a context $C\in\Ctx(x)$ and piece
+$s\in\Sol(x)$, a move replaces the piece, yielding the neighbor
+$C[t]$ for some $t\in\Sol(x)$.
+Practical move sets---swaps, rotations, 2-opt---restrict which
+subgoals $x$ and replacement pieces $t$ are eligible, but they all
+have this shape.
+Subgoals therefore do not appear as terrain points; they index the
+\emph{neighborhood function}: a swap at one subgoal is an edge
+between two complete solutions.
 
-The terrain maps into the framework directly.
-Subgoals are the vertices reachable from a start vertex $v_0$; each
-descent edge $x\to y$ contributes a unary constructor $(y)\to x$;
-each sink $m$ has one primitive solution (``stop here,'' with cost
-$c(m)$); the goal is $v_0$.
-A solution of $x$ is a descending walk from $x$ to a sink, and its
-cost is the cost of the sink it reaches.
-
-\begin{remark}[Non-convexity is not width]
-\label{rem:terrain-width}
-For the standalone question---what is the best sink value reachable
-from $v_0$?---every context merely prepends a descent prefix and
-contributes nothing to cost, so \emph{all} solutions of a subgoal
-are continuation-equivalent: $w(x)=1$, and the scalar recurrence
-$V_x=\min_{x\to y}V_y$ is exact with no properties at all.
-The multi-basin structure that defeats greedy descent is invisible
-to offline memoization.
-Non-convexity obstructs \emph{irrevocable} search; it is not, by
-itself, a failure of Bellman's principle.
+\begin{remark}[Substitution monotonicity; to be proved]
+\label{rem:terrain-mono}
+Under a semantic factorization, swapping in an equal-labeled,
+cheaper piece never increases total cost: if
+$\lambda_x(t)=\lambda_x(s)$ and $c_x(t)\le c_x(s)$, then
+$c_{\goal}(C[t])\le c_{\goal}(C[s])$ for every context $C$.
+(Induct up the spine of $C$: at each constructor the child labels
+agree, so the output labels agree by factorization, and the costs
+compare by monotonicity of $G_r$ in the cost coordinate.)
+Consequently, a move that lowers a piece's cost can raise the total
+cost only by \emph{weakening the piece's label}.
 \end{remark}
 
-\begin{remark}[Embedding creates width]
-\label{rem:terrain-embed}
-Sink identity becomes continuation-relevant the moment the terrain
-is embedded in a larger process: the walk continues from wherever it
-lands (a restart, a warm start, a later optimization phase, a
-composite objective).
-Take the property domain $O$ to be the sinks, with sink identity
-demanded by the enclosing goal.
-The canonical label of a vertex is then its \emph{basin frontier}:
-the Pareto-optimal pairs (sink, best cost reachable in that basin).
-The transfer map of a descent edge is union followed by dominance
-pruning---join-compositional---and the lifted recurrence specializes
-to a single reverse-topological pass,
-\[
-F(x)=\bigsqcup_{x\to y}F(y),
-\]
-computable in linear time.
-Width is the number of continuation-distinct basins: the branching
-antichains of the terrain.
+This locates the source of ruggedness.
+A greedy improver that gets stuck short of the optimum---despite
+having improving pieces available---is stuck on a \emph{label
+tradeoff}: a cheaper-but-weaker piece against a
+costlier-but-stronger one.
+These are exactly the dominance-incomparable entries of the memo
+frontier (Remark~\ref{rem:pareto}); the branching antichains of the
+cost--property frontier are the generators of the terrain's
+non-convexity.
+If every subgoal's solutions carried a single label, piecewise
+improvement would compose monotonically and the ridges would
+vanish.
+In this precise sense, the terrain's ruggedness is the width of
+Section~\ref{sec:width} made visible; the notoriously rugged move
+terrains of the traveling salesperson problem and Held--Karp's
+exponential table (Example~\ref{ex:heldkarp}) are two symptoms of
+one underlying quantity.
+(Restricted move sets add a second, unrelated source of local
+minima---poverty of moves---which the framework does not speak to.)
+
+\begin{remark}[Deferred commitment dissolves the terrain]
+\label{rem:terrain-dissolve}
+A local search occupies one terrain point at a time, so at every
+label tradeoff it makes an irrevocable commitment.
+The lifted recurrence instead carries, per subgoal, the entire
+cost--property frontier: the discrete choice among incomparable
+pieces is deferred until the context that discriminates among them
+has been assembled.
+This is an order-theoretic analogue of convexification:
+convexification enlarges a continuous search space until local
+optima disappear; the frontier lift enlarges the memo state until
+Bellman's principle holds.
+Equivalently one may keep the terrain and lift the \emph{cost}, in
+the spirit of Ioannidis and Kang's analysis of query optimization
+terrains~\cite{ioannidis1991left}: a vector objective with one
+coordinate per maximal label, compared by dominance.
+The cost lift and the semantic lift are the same construction in
+different coordinates.
 \end{remark}
 
-\begin{remark}[Three coordinate systems]
-\label{rem:terrain-coords}
-The same lift has three presentations.
-As a \emph{state} lift, memoize pairs (vertex, basin).
-As a \emph{cost} lift, replace the scalar objective by a vector with
-one coordinate per live basin, with componentwise minimum as join;
-smoothing a rugged optimization surface by adding cost dimensions,
-in the spirit of Ioannidis and Kang's analysis of query optimization
-terrains~\cite{ioannidis1991left}, is this construction.
-As a \emph{semantic} lift, label vertices by frontier bundles as in
-this paper.
-We expect these to be formally interchangeable, and the standalone
-version of the story---keeping several basins alive under
-irrevocable moves---is the determination-theoretic face of the same
-frontier (Section~\ref{sec:determination-bridge}): deferred
-commitment, not memoization.
+\begin{remark}[Dimension as terrain smoothing]
+\label{rem:terrain-dim}
+The terrain gives the Bellman dimension
+(Definition~\ref{def:dimension}) an operational reading.
+Say a cost lift is \emph{smoothing} if dominance-descent by
+substitution never strands: from every suboptimal point, some move
+improves in the dominance order on cost vectors.
+By Remark~\ref{rem:terrain-mono}, label tradeoffs are the only
+ridges, so a smoothing lift is one with enough coordinates to keep
+every tradeoff visible as an incomparability rather than collapse it
+into a scalar ridge; we expect the Boolean dimension to be, up to
+encoding, the least dimensionality of a smoothing cost lift.
+The terrain also sharpens the lower bound of
+Proposition~\ref{prop:bounds}(2), which needs labels only to be
+\emph{distinct}.
+If two equal-cost pieces are each strictly preferred by some
+context, their labels must be \emph{incomparable}: a label
+containing the other, at equal cost, would dominate, contradicting
+the other piece's preferred context.
+A family of $k$ pairwise mutually-preferred equal-cost classes
+therefore forces a $k$-antichain of labels, and by Sperner's theorem
+$\binom{d}{\lfloor d/2\rfloor}\ge k$---a (slightly) stronger demand
+than distinctness, and a conceptually different one: dimension
+counts coordinates for the \emph{incomparability structure} of the
+continuation classes, not merely names for them.
+Finally, the compositionality gap (Open
+Problem~\ref{open:gap}) acquires a geometric face: coordinates must
+be features that substitution respects---propagating through every
+constructor---and naming classes is cheap where finding
+move-respecting features may not be.
 \end{remark}
 
 \subsection{The Mult-Egraph}
