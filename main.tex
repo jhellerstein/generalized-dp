@@ -1517,8 +1517,18 @@ Section~\ref{sec:width} made visible; the notoriously rugged move
 terrains of the traveling salesperson problem and Held--Karp's
 exponential table (Example~\ref{ex:heldkarp}) are two symptoms of
 one underlying quantity.
-(Restricted move sets add a second, unrelated source of local
-minima---poverty of moves---which the framework does not speak to.)
+
+One distinction keeps the claim honest.
+A point can be locally minimal for two different reasons: every
+available move loses on a cost--property tradeoff, or the winning
+substitution simply lies outside the move set---as when a 2-opt
+local minimum in the traveling salesperson problem is escaped by a
+3-opt move.
+The first reason is intrinsic to the problem and is what the width
+analysis measures; the second is an artifact of search design, the
+classical concern of neighborhood
+exactness~\cite{papadimitriou1982combinatorial}, and our framework
+does not speak to it.
 
 \begin{remark}[Deferred commitment dissolves the terrain]
 \label{rem:terrain-dissolve}
@@ -1532,45 +1542,164 @@ This is an order-theoretic analogue of convexification:
 convexification enlarges a continuous search space until local
 optima disappear; the frontier lift enlarges the memo state until
 Bellman's principle holds.
-Equivalently one may keep the terrain and lift the \emph{cost}, in
-the spirit of Ioannidis and Kang's analysis of query optimization
-terrains~\cite{ioannidis1991left}: a vector objective with one
-coordinate per maximal label, compared by dominance.
-The cost lift and the semantic lift are the same construction in
-different coordinates.
+Equivalently one may keep the terrain---its points and moves
+unchanged---and lift the \emph{cost}: replace the scalar objective
+$c$ by a vector objective
+$\hat c:\Sol(\goal)\to\Rbar^{\,d}$, compared by dominance, from
+which $c$ is recovered by a fixed monotone aggregation (here,
+coordinatewise minimum).
+We call this a \emph{cost lift}; its size is $d$, the number of
+cost dimensions.
+Taking one coordinate per maximal label---in the spirit of
+Ioannidis and Kang's analysis of query optimization
+terrains~\cite{ioannidis1991left}---the cost lift and the semantic
+lift become the same construction in different coordinates.
 \end{remark}
+
+The remainder of this subsection is the most speculative material in
+the paper: two remarks that fix a geometric target for the dimension
+theory, an open problem that states exactly what remains to be
+defined and proved, and a summary of the literature bridges we
+believe deserve exploration.
 
 \begin{remark}[Dimension as terrain smoothing]
 \label{rem:terrain-dim}
 The terrain gives the Bellman dimension
-(Definition~\ref{def:dimension}) an operational reading.
-Say a cost lift is \emph{smoothing} if dominance-descent by
-substitution never strands: from every suboptimal point, some move
-improves in the dominance order on cost vectors.
+(Definition~\ref{def:dimension}) a reading in the geometry of the
+cost surface itself, independent of any property vocabulary.
+A cost lift of size $d$ (Remark~\ref{rem:terrain-dissolve}) embeds
+the surface in $\Rbar^{\,d}$, compared by dominance; call the lift
+\emph{smoothing} if dominance-descent by substitution never strands:
+from every suboptimal point, some move improves in the dominance
+order.
+The recovery condition is what keeps smoothing meaningful: the
+vector optimum must project back to the scalar optimum, so the
+coordinates cannot simply ignore $c$.
+The question below is the least $d$ for which a smoothing lift
+exists.
 By Remark~\ref{rem:terrain-mono}, label tradeoffs are the only
-ridges, so a smoothing lift is one with enough coordinates to keep
-every tradeoff visible as an incomparability rather than collapse it
-into a scalar ridge; we expect the Boolean dimension to be, up to
-encoding, the least dimensionality of a smoothing cost lift.
-The terrain also sharpens the lower bound of
-Proposition~\ref{prop:bounds}(2), which needs labels only to be
-\emph{distinct}.
-If two equal-cost pieces are each strictly preferred by some
-context, their labels must be \emph{incomparable}: a label
-containing the other, at equal cost, would dominate, contradicting
-the other piece's preferred context.
-A family of $k$ pairwise mutually-preferred equal-cost classes
-therefore forces a $k$-antichain of labels, and by Sperner's theorem
-$\binom{d}{\lfloor d/2\rfloor}\ge k$---a (slightly) stronger demand
-than distinctness, and a conceptually different one: dimension
-counts coordinates for the \emph{incomparability structure} of the
-continuation classes, not merely names for them.
-Finally, the compositionality gap (Open
-Problem~\ref{open:gap}) acquires a geometric face: coordinates must
-be features that substitution respects---propagating through every
-constructor---and naming classes is cheap where finding
-move-respecting features may not be.
+ridges, so smoothing requires exactly that every genuine tradeoff
+remain visible as an incomparability of embedded points rather than
+collapse into a scalar ridge.
+Which incomparabilities are genuine is forced by the problem: if two
+equal-cost pieces are each strictly preferred by some context, no
+smoothing embedding may order their images, since domination at
+equal cost would contradict the dominated piece's preferred context.
+Realizing a prescribed incomparability structure by dominance in $d$
+scalar coordinates is precisely the classical \emph{order dimension}
+of Dushnik and Miller~\cite{dushnikmiller1941}.
+We therefore expect the minimal smoothing dimension to be the order
+dimension of the forced-preference structure on continuation
+classes.
+The semantic (Boolean) dimension bounds it from above: bundle labels
+embed the frontier in the Boolean lattice $\mathcal P(O)$, whose
+order dimension is exactly $|O|$.
+Sperner's theorem gives the counting form of the lower bound: a
+$k$-antichain of forced incomparabilities requires
+$\binom{d}{\lfloor d/2\rfloor}\ge k$, (slightly) more than the
+$2^d\ge w$ of Proposition~\ref{prop:bounds}(2), and conceptually
+different: dimension measures the \emph{incomparability structure}
+of the continuation classes, not the number of names.
+Finally, the compositionality gap (Open Problem~\ref{open:gap})
+acquires a geometric face: the coordinates of a smoothing embedding
+must be features that substitution respects---propagating through
+every constructor---so the compositional dimension may exceed the
+order dimension, and by how much is the gap.
 \end{remark}
+
+\begin{remark}[Basin count is not dimension]
+\label{rem:terrain-basins}
+The deferral analogy is exact at the level of a single ridge:
+deferring one dominance-incomparable pair in a memo table removes
+one ridge from the lifted terrain, and deferring all of them
+dissolves the terrain (Remark~\ref{rem:terrain-dissolve}).
+It is tempting to conclude that dimension is a function of the
+number of basins, but in the surface geometry the two quantities are
+classically independent: posets of order dimension two already
+contain arbitrarily large antichains, so two coordinates can smooth
+a terrain with arbitrarily many mutually-ridged basins.
+Moreover the basin count varies with the move set and the particular
+costs, which the order dimension does not.
+The distinction is between counting and structure.
+Basin count asks \emph{how many} tradeoffs the instance realizes.
+Dimension asks how the tradeoffs \emph{interlock}: whether every
+incomparability can be explained by the same two rankings
+disagreeing---in which case two coordinates suffice, however many
+tradeoffs there are---or whether the incomparabilities are
+entangled in patterns that force many mutually independent
+rankings, as in the standard examples of dimension
+theory~\cite{trotter1992}.
+
+What does hold is an instance-computable upper bound: re-encoding
+with one property per realized bundle (singleton labels
+$\lambda'_x(s)=\{(x,\lambda_x(s))\}$, arranged as in
+Proposition~\ref{prop:trivial}) shows that the dimension is at most
+the number of non-empty bundle entries the instance realizes,
+$\sum_x |\lambda_x(\Sol(x))|$; and, conditional on constructors
+descending to continuation classes
+(Conjecture~\ref{conj:universality}), at most $\sum_x w(x)$, via one
+property per class.
+Both bounds are typically loose, and the looseness is the point: a
+good property vocabulary is precisely a compression of many realized
+bundles---and many basins---onto a low-dimensional dominance order,
+and finding such a vocabulary is the compositionality gap once more.
+\end{remark}
+
+\begin{openproblem}[Geometric dimension of a dynamic program]
+\label{open:geometric-dim}
+Make the smoothing picture precise.
+\begin{enumerate}
+\item \emph{Identify the relation.}
+  Order dimension realizes a \emph{given} partial order; our
+  constraints prescribe certain \emph{incomparabilities} (mutually
+  preferred equal-cost classes) while leaving other comparabilities
+  free.
+  The quantity at stake is therefore the minimum dimension over all
+  partial orders consistent with the constraints---in general
+  smaller than the dimension of any one realized frontier order.
+  Define this quantity, and determine whether it coincides with a
+  standard notion.
+\item \emph{Prove the sandwich.}
+  Conjecturally,
+  \[
+  \text{order dimension of the forced structure}
+  \;\le\;
+  \text{compositional (Bellman) dimension}
+  \;\le\;
+  |O|
+  \]
+  for every sufficient vocabulary $O$, with the first inequality
+  strict exactly when substitution-respecting coordinates cost more
+  than unconstrained ones (Open Problem~\ref{open:gap}).
+\item \emph{Settle the complexity.}
+  Deciding order dimension $\le 2$ is polynomial; $\le 3$ is
+  NP-complete~\cite{yannakakis1982}.
+  Determine what this implies for computing or approximating the
+  Bellman dimension of a decomposition system, and identify
+  tractable classes (e.g., bounded width, interval-order frontier
+  structure).
+\end{enumerate}
+\end{openproblem}
+
+Several bodies of literature meet here, and each offers something
+specific.
+Dimension theory for finite posets~\cite{trotter1992} supplies
+lower-bound technology (critical pairs, the standard examples) that
+should transfer to Bellman dimension essentially unchanged; it is
+also where the prescribed-incomparability variant of item (1) above
+should be checked against known notions before we coin one.
+The complexity theory of local search---PLS~\cite{johnson1988easy}
+and neighborhood exactness~\cite{papadimitriou1982combinatorial}---%
+addresses how hard it is to \emph{find} local optima, where our
+width analysis addresses \emph{why} they exist; whether small width
+places a problem in a tractable fragment of PLS is, to our
+knowledge, open.
+Finally, the empirical landscape-analysis tradition in query
+optimization~\cite{ioannidis1991left} measured the shapes of real
+cost surfaces; the width and dimension of Section~\ref{sec:width}
+are candidate structural explanations for those measurements, and
+re-running such experiments with frontier-indexed state would test
+the theory.
 
 \subsection{The Mult-Egraph}
 \label{sec:multegraph}
@@ -1798,6 +1927,33 @@ Y.~E. Ioannidis and Y.~C. Kang.
 \newblock Left-deep vs. bushy trees: An analysis of strategy spaces
 and its implications for query optimization.
 \newblock In \emph{SIGMOD}, 1991.
+
+\bibitem{trotter1992}
+W.~T. Trotter.
+\newblock \emph{Combinatorics and Partially Ordered Sets: Dimension
+Theory}.
+\newblock Johns Hopkins University Press, 1992.
+
+\bibitem{yannakakis1982}
+M.~Yannakakis.
+\newblock The complexity of the partial order dimension problem.
+\newblock \emph{SIAM J. Algebraic Discrete Methods}, 3(3), 1982.
+
+\bibitem{johnson1988easy}
+D.~S. Johnson, C.~H. Papadimitriou, and M.~Yannakakis.
+\newblock How easy is local search?
+\newblock \emph{J. Comput. Syst. Sci.}, 37(1), 1988.
+
+\bibitem{dushnikmiller1941}
+B.~Dushnik and E.~W. Miller.
+\newblock Partially ordered sets.
+\newblock \emph{American Journal of Mathematics}, 63(3), 1941.
+
+\bibitem{papadimitriou1982combinatorial}
+C.~H. Papadimitriou and K.~Steiglitz.
+\newblock \emph{Combinatorial Optimization: Algorithms and
+Complexity}.
+\newblock Prentice-Hall, 1982.
 
 \bibitem{bancilhon1986magic}
 F.~Bancilhon, D.~Maier, Y.~Sagiv, and J.~D. Ullman.
