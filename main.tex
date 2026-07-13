@@ -1,1987 +1,687 @@
-\documentclass[acmsmall,nonacm]{acmart}
+\documentclass[11pt]{book}
 
-\settopmatter{printfolios=true}
-
-% ---------- Packages ----------
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm}
 \usepackage{enumitem}
-\usepackage{booktabs}
-\usepackage{tikz}
+\usepackage[hidelinks]{hyperref}
 
-% ---------- Theorem environments ----------
-\newtheorem{theorem}{Theorem}
-\newtheorem{lemma}{Lemma}
-\newtheorem{corollary}{Corollary}
-\newtheorem{definition}{Definition}
-\newtheorem{proposition}{Proposition}
-\newtheorem{conjecture}{Conjecture}
-\newtheorem{openproblem}{Open Problem}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[chapter]
+\newtheorem{example}[definition]{Example}
+\newtheorem{question}[definition]{Question}
+
+\theoremstyle{plain}
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{proposition}[definition]{Proposition}
+\newtheorem{corollary}[definition]{Corollary}
+\newtheorem{conjecture}[definition]{Conjecture}
+
 \theoremstyle{remark}
-\newtheorem{remark}{Remark}
-\newtheorem{example}{Example}
-\newtheorem{convention}{Convention}
+\newtheorem{remark}[definition]{Remark}
 
-% ---------- Macros ----------
-\newcommand{\Down}{\mathsf{Down}}
-\newcommand{\Ant}{\mathsf{Ant}}
-\newcommand{\Sol}{\mathsf{Sol}}
-\newcommand{\Prim}{\mathsf{Prim}}
-\newcommand{\Ctx}{\mathsf{Ctx}}
-\newcommand{\Rbar}{\overline{\mathbb{R}}_{\ge 0}}
-\newcommand{\NL}{\mathsf{NL}}
-\newcommand{\MJ}{\mathsf{MJ}}
-\newcommand{\goal}{x_\star}
-\newcommand{\TODO}[1]{\medskip\noindent\fbox{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{TODO:}\ #1}}\medskip}
+\title{Semantic Schemas and Canonicalization}
+\author{Joseph M. Hellerstein}
+\date{}
 
 \begin{document}
 
-\title{Semantic Dynamic Programming}
-
-\author{Joseph M. Hellerstein}
-\affiliation{%
-  \institution{UC Berkeley \& Amazon Web Services}
-  \city{Berkeley, CA}
-  \country{USA}
-}
-
-\author{Sarah Morin}
-\affiliation{%
-  \institution{UC Berkeley}
-  \city{Berkeley, CA}
-  \country{USA}
-}
-
-\author{Max Willsey}
-\affiliation{%
-  \institution{UC Berkeley}
-  \city{Berkeley, CA}
-  \country{USA}
-}
-
-\begin{abstract}
-  Dynamic programming succeeds when every subproblem admits a compact
-  summary that is sufficient for all future compositions.
-  Identifying the right summary is a domain-by-domain art:
-  Selinger's ``interesting orders'' in query optimization and
-  property-aware extraction in equality saturation are two prominent
-  examples.
-  We propose an abstract framework---\emph{semantic dynamic
-  programming}---in which subproblems carry a shrinking set of
-  semantically relevant properties, and memoization is indexed by
-  bundles of those properties; when properties are ordered by
-  refinement, the bundle domain is a canonical join-semilattice
-  completion.
-  We give sufficient conditions under which the lifted recurrence
-  satisfies Bellman's Principle of Optimality exactly, show that the
-  bundle domain is the free join-semilattice over the refinement
-  poset, and recover Selinger's algorithm as the discrete instance.
-  We then state the results we aim to prove: a universality theorem
-  characterizing Bellman's principle by the existence of a semantic
-  factorization, and a minimality theorem identifying the
-  continuation-equivalence quotient as the canonical such
-  factorization.
-  On this account every compositionally presented discrete
-  optimization problem can be lifted to satisfy Bellman's principle;
-  what varies is the price.
-  We accordingly propose \emph{width} and \emph{dimension}---the
-  size of a minimal sufficient Pareto frontier and the number of
-  properties needed to index it---as intrinsic complexity measures
-  of discrete optimization problems.
-\end{abstract}
-
 \maketitle
+\tableofcontents
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Foundations}
-\label{sec:foundations}
+\chapter{Introduction}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\subsection{Motivation}
-\label{sec:motivation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Which Distinctions Must an Optimizer Preserve?}
+\label{sec:intro-preserve}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-Bellman's Principle of Optimality is usually stated operationally: an
-optimal solution is composed of optimal solutions to subproblems.
-The principle holds or fails depending on how subproblems are
-identified.
-When it fails, skilled practitioners have repeatedly rediscovered
-the same remedy---\emph{refine the subproblem state} until the
-principle holds again---each time as an isolated trick for the
-problem at hand.
-The remedy has no name, no general formulation, and no theory
-telling us when it applies or what refinement suffices.
+A broad family of discrete optimization problems can be characterized
+as encompassing a hierarchy of subproblems to optimize.
+A subproblem may admit many solutions.
+Retaining all of them is correct but often impractical.
+Retaining only one locally preferred solution is efficient but
+generally unsound.
+An optimizer for these settings needs a principled way to decide which
+distinctions among solutions must be preserved.
 
-The canonical example is Selinger's dynamic program for join
-ordering~\cite{selinger1979access}.
-Memoizing only the cheapest plan per subexpression violates the
-principle: a slightly more expensive plan whose output is sorted may
-enable a much cheaper merge join later.
-Selinger's remedy was to index the memo table by
-\emph{interesting orders}: output properties that some future
-operator can exploit.
-Equality saturation exhibits the same phenomenon.
-Extraction from an e-graph~\cite{willsey2021egg} that memoizes one
-cheapest term per e-class is exact only when cost is compositional on
-e-classes; richer objectives (streamability, partitioning,
-provenance) require the extractor to retain a frontier of
-representatives per class, indexed by the properties that enclosing
-contexts can observe.
-The nearest thing to a named version of the remedy appears in
-reinforcement learning and control, where \emph{state
-augmentation}~\cite{sutton2018reinforcement} enlarges the state
-until the Markov property holds.
-That practice confirms the pattern but supplies no theory:
-the augmentation is devised by insight, problem by problem, with no
-characterization of when a proposed augmentation is sufficient,
-minimal, or canonical.
+Relational database query optimization provides a familiar example.
+For a fixed relational subquery, many physical plans compute the
+same logical result.
+Some differ only in properties such as output order.
+A subplan that is more expensive in isolation may nevertheless be
+the best input to a larger optimal plan because an enclosing operator
+can exploit that order.
+Selinger's treatment of interesting orders preserves exactly
+such distinctions: plans for the same subquery are kept
+separate only when a larger expression may distinguish them.
 
-These fixes are invariably presented as domain-specific engineering.
-The aim of this paper is to exhibit the mathematics they share---and,
-with it, the missing characterization.
-Informally, we claim:
+The same issue appears in equality saturation.
+An e-class records alternatives that are equivalent at one
+semantic level, while analyses or nested equivalences may retain
+finer distinctions needed by surrounding expressions.
+Again, the difficulty is not merely to enumerate alternatives,
+but to determine the coarsest equivalence under which future
+composition remains correct.
 
-\begin{quote}
-  \emph{Every} discrete optimization problem---once its solutions
-  are presented compositionally, as assemblies of solutions to
-  subproblems---can be made to satisfy Bellman's principle.
-  The trick is twofold: expose sufficiently expressive
-  \emph{semantic properties} of partial solutions, and defer
-  commitment by retaining a sufficiently large frontier of
-  Pareto-optimal (non-dominated) partial solutions per subgoal.
-\end{quote}
+These notes study that problem directly.
 
-The mechanism beneath the trick is a factorization: a dynamic
-program satisfies Bellman's principle exactly when its subproblem
-summaries factor through a domain of \emph{semantic property
-bundles}, where each subproblem carries a monotonically shrinking
-set of properties that remain relevant to its future.
-Because sufficiency can always be achieved---in the worst case the
-properties describe partial solutions completely and the frontier
-retains nearly everything---the substantive question is
-quantitative: \emph{how large must the frontier be?}
-We take the size and dimensionality of a minimal sufficient frontier
-to be intrinsic complexity measures of a discrete optimization
-problem; Section~\ref{sec:width} makes them precise and poses their
-characterization as a central goal.
+We begin from a static semantic object rather than from a search
+algorithm.
+The object has two orthogonal components.
 
-This section develops each ingredient of that claim carefully, with
-Selinger's algorithm as a running example and e-graph extraction as
-a parallel thread; Table~\ref{tab:instances} at the end of the
-section summarizes how both instantiate the framework.
-We first work in a \emph{Boolean} model, where properties are
-independent of one another; Section~\ref{sec:refinement} then
-refines the model to allow properties that subsume one another.
-Section~\ref{sec:results} states the theorems we intend to prove.
-The mathematics required is modest: finite sets, partial orders, and
-induction carry most of the development, and the two lightweight
-algebraic notions we lean on---join-semilattices and quotients by
-equivalence relations---are defined where they first appear.
+\begin{enumerate}[label=(\arabic*)]
 
-\subsection{Decomposition Systems}
-\label{sec:decomposition}
+\item
+A hierarchy of semantic equivalences groups alternatives at
+multiple resolutions.
+We call its classes \emph{multe-classes}.
 
-We begin with the combinatorial skeleton of a dynamic program: what
-the subproblems are and how solutions compose.
-No costs and no properties yet.
-A decomposition system names the subproblems (\emph{subgoals}), the
-ways a solution to a subproblem is assembled from solutions to
-smaller subproblems (\emph{constructors}), and the subproblem we
-ultimately care about (the \emph{goal}).
+\item
+A compositional graph records how a non-atomic alternative
+depends on multe-classes of subgoals.
+As in an ordinary e-graph, a parent e-node references child
+e-classes rather than child e-nodes.
 
-\begin{definition}[Decomposition system]
-\label{def:decomposition}
-A \emph{decomposition system} is a triple
-$(X,\mathcal R,\goal)$ where
-\begin{enumerate}
-\item $X$ is a finite set of \emph{subgoals};
-\item $\mathcal R$ is a finite set of \emph{constructors}, each of
-  the form
-  \[
-  r : (x_1,\ldots,x_{k_r}) \to x
-  \]
-  with $x, x_1,\ldots,x_{k_r}\in X$ and arity $k_r\ge 1$; and
-\item $\goal\in X$ is the \emph{goal}.
 \end{enumerate}
-We require acyclicity: the directed graph on $X$ with an edge
-$x_i\to x$ for every constructor $r:(x_1,\ldots,x_{k_r})\to x$ and
-every $i$ must have no directed cycle.
-\end{definition}
 
-Constructors induce a reachability order among subgoals: $x$ lies
-below $y$ when $x$ can be used, perhaps through intermediate
-constructions, in building $y$.
+Their combination is a \emph{multe-graph}.
+The multe component records which alternatives are equivalent at
+each semantic resolution.
+The graph component records where those distinctions may be
+observed by composition.
+Neither component, by itself, specifies an optimization
+objective.
 
-\begin{definition}[Subgoal order]
-\label{def:subgoal-order}
-Write $x \le_X y$ when there is a directed path from $x$ to $y$ in
-the graph of Definition~\ref{def:decomposition} (including the empty
-path, so $\le_X$ is reflexive).
-By acyclicity, $(X,\le_X)$ is a finite poset.
-\end{definition}
+A multe-graph is therefore a schema for a family of related
+problems.
+A particular problem instance is obtained by imposing
+requirements on that schema.
+For example, the queries
 
-Solutions are terms: a solution to $x$ is either given outright
-(\emph{primitive}) or assembled by a constructor from solutions to
-its children.
+\[
+\texttt{SELECT * FROM R JOIN S}
+\]
 
-\begin{definition}[Solutions]
-\label{def:solutions}
-Each subgoal $x\in X$ is equipped with a finite (possibly empty) set
-$\Prim(x)$ of \emph{primitive solutions}.
-The families $\Sol(x)$ of \emph{solutions} are defined inductively as
-the least sets satisfying:
-\begin{enumerate}
-\item $\Prim(x)\subseteq\Sol(x)$; and
-\item if $r:(x_1,\ldots,x_k)\to x$ is a constructor and
-  $s_i\in\Sol(x_i)$ for each $i$, then the formal term
-  $r(s_1,\ldots,s_k)\in\Sol(x)$.
+and
+
+\[
+\texttt{SELECT * FROM R JOIN S ORDER BY R.a}
+\]
+
+may share one underlying multe-graph.
+The second query adds a requirement at the root.
+Other requirements may be attached elsewhere.
+A memory-constrained instance might, for example, forbid
+implementations that sort their inputs.
+
+Requirements restrict the admissible relation represented by
+the schema.
+Because parent e-nodes refer to child multe-classes, local
+requirements propagate through the graph.
+After propagation, some e-nodes have been removed and some
+semantic boundaries have become unobservable under the requirements.
+Those boundaries may be collapsed.
+The remaining non-empty multe-classes form the semantic state that must be
+retained for the instance.
+
+Only after this instantiation step do we choose
+representatives for the remaining e-classes.
+We call that second operation \emph{canonicalization}.
+The separation is important:
+
+\begin{description}[style=nextline]
+
+\item[Requirements]
+remove alternatives from the \emph{admissible} relation mapping an e-class
+to its e-nodes.
+
+\item[Canonicalization]
+reduces each remaining relation to the unique representation 
+desired for the application.
+
+\end{description}
+
+Scalar optimization is one canonicalization discipline.
+A cost order may entail a unique optimum in each surviving
+multe-class.
+Pareto optimization is another.
+It lifts the outcome domain from individual alternatives to
+sets of undominated alternatives; the Pareto frontier is then a
+uniquely entailed outcome in the lifted domain. These are the
+standard settings for optimization. 
+Determination Theory applies when several admissible outcomes remain
+and no semantic order entails a unique one; choosing among them
+requires a \emph{commitment}; we leave this topic aside in the remainder.
+
+The present document develops this decomposition in a
+simplest-first order.
+We begin with finite, acyclic schemas, tree-shaped
+multe-class hierarchies, and Boolean requirements.
+After the basic objects and candidate theorems are clear, we
+relax these assumptions.
+
+The main questions are then precise.
+
+\begin{enumerate}[label=(\arabic*)]
+
+\item
+What local conditions make a multe-graph a sound semantic
+schema?
+
+\item
+When does requirement propagation have a unique least fixed
+point?
+
+\item
+Is the propagated structure the coarsest quotient that
+preserves every distinction observable under the requirements?
+
+\item
+Under what conditions is one canonical representative per
+surviving multe-class sufficient?
+
 \end{enumerate}
-By finiteness and acyclicity, every $\Sol(x)$ is finite.
-We assume $\Sol(x)\neq\varnothing$ for every $x$ that participates in
-some solution of the goal, and in particular
-$\Sol(\goal)\neq\varnothing$.
+
+A positive answer to the last question recovers Bellman's
+Principle of Optimality as a consequence of the semantic
+structure rather than as an assumption about a particular search
+procedure.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Roadmap}
+\label{sec:intro-roadmap}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Chapter~\ref{chap:schemas} introduces semantic schemas: goals,
+e-nodes, and the compositional graph.
+Chapter~\ref{chap:quotients} introduces multe-classes and their
+refinement hierarchies.
+Chapter~\ref{chap:multe-graphs} combines the two structures into
+multe-graphs.
+Chapter~\ref{chap:instances} defines requirements and problem
+instances.
+Chapter~\ref{chap:canonicalization} separates canonicalization
+from instantiation.
+Chapter~\ref{chap:extraction} defines extraction as requirement
+propagation followed by canonicalization.
+The later chapters develop examples, theorem statements, and
+generalizations.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Semantic Schemas}
+\label{chap:schemas}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This chapter begins with the unconstrained local vocabulary of a
+semantic schema: goals and their e-nodes.  Semantic equivalence and
+compositional references will be added in the following chapters.
+No requirements, costs, or canonicalization are assumed.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Goals and E-Nodes}
+\label{sec:goals-enodes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+We begin with the local objects from which a semantic schema is
+assembled.
+
+At this stage, we deliberately ignore equivalence, composition,
+requirements, costs, and canonicalization.  We assume only that a
+problem can be divided into named goals, and that each goal admits a
+collection of alternative realizations.
+
+\begin{definition}[Goal]
+A \emph{goal} is a semantic task whose admissible realizations are to
+be represented by the schema.
 \end{definition}
 
-\begin{example}[Running example: a three-relation join]
-\label{ex:query}
-Consider the query
-\[
-\texttt{SELECT * FROM R, S, T WHERE R.a = S.a AND S.b = T.b}
-\]
-over relations $R,S,T$.
-The subgoals are the connected subexpressions
-\[
-X = \{R,\; S,\; T,\; RS,\; ST,\; RST\},
-\]
-with goal $\goal = RST$.
-(We omit the cross product $RT$ for brevity; nothing changes if it is
-included.)
-The constructors are, for each join subgoal, a nested-loop join and a
-merge join in each input order; for instance
-\[
-\NL : (R,S)\to RS,
-\qquad
-\MJ : (R,S)\to RS,
-\]
-and similarly for $(S,T)\to ST$, $(RS,T)\to RST$, and
-$(R,ST)\to RST$.
-The primitive solutions are the access methods:
-\[
-\Prim(R)=\{R_\bot,\;R_a\},
-\quad
-\Prim(S)=\{S_\bot,\;S_a,\;S_b\},
-\quad
-\Prim(T)=\{T_\bot,\;T_b\},
-\]
-where $R_\bot$ is an unordered scan of $R$, $R_a$ is a scan of $R$
-sorted on column $a$, and so on: seven access methods in all.
-Join subgoals have no primitive solutions.
-\end{example}
+The word ``goal'' is intentionally neutral.  Depending on the
+application, a goal may be
 
-\begin{example}[E-graphs as decomposition systems]
-\label{ex:egraph}
-An e-graph is, in this vocabulary, a decomposition system.
-Subgoals are e-classes.
-Each e-node with child classes $(x_1,\ldots,x_k)$ belonging to class
-$x$ is a constructor $(x_1,\ldots,x_k)\to x$; e-nodes with no
-children are primitive solutions.
-The goal is the root e-class, and $\Sol(x)$ is exactly the set of
-terms extractable from class $x$.
-(E-graphs may contain cycles; here we restrict attention to acyclic
-e-graphs, as is common in extraction.)
-Ordinary extraction memoizes one cheapest term per class; the
-framework developed below memoizes a \emph{frontier} of terms per
-class, indexed by extraction-relevant properties.
-This has a natural data-structure realization, the
-\emph{mult-egraph} (defined in Section~\ref{sec:multegraph}): each
-e-class is subdivided into subclasses of terms with equal semantic
-labels, so that the memo-table distinctions of this paper live in
-the graph itself rather than in a side table.
-\end{example}
-
-\subsection{Semantic Properties}
-\label{sec:properties}
-
-Solutions to the same subgoal may differ in ways that matter to the
-contexts that consume them.
-We model those differences with a finite set of properties; a
-solution will later be labeled by the subset of properties it
-provides.
-For now properties are independent of one another; we enrich them
-with a refinement order in Section~\ref{sec:refinement}.
-
-\begin{definition}[Property domain]
-\label{def:property-domain}
-A \emph{property domain} is a finite set $O$, whose elements are
-called \emph{semantic properties}.
-\end{definition}
-
-\begin{example}[Sort orders as properties]
-\label{ex:discrete-properties}
-In Example~\ref{ex:query} the properties are output sort orders on
-the two join keys.
-Because $R.a = S.a$ and $S.b = T.b$, we canonicalize each
-equivalence class of columns to a single property, yielding the
-property domain
-\[
-O = \{a,\; b\},
-\]
-where $a$ means ``output sorted on the $a$-key equivalence class''
-and $b$ likewise.
-Note that ``unordered'' is not a property; it is the absence of
-properties, represented below by the empty bundle.
-\end{example}
-
-\subsection{Remaining Interest}
-\label{sec:interest}
-
-The property domain is global: it enumerates the properties that
-exist.
-Which properties \emph{matter} is local to the problem instance and
-to the subgoal.
-A property matters at subgoal $x$ only if some constructor applied
-above $x$ can still exploit it.
-As construction proceeds toward the goal, the constructors yet to be
-applied form a shrinking set, so the properties they can exploit
-shrink as well.
-We package this as an assignment $I$ giving each subgoal $x$ the set
-$I(x)$ of properties still relevant above $x$---the
-\emph{undischarged obligations} of $x$.
-Its two axioms formalize the intuitions just given.
-Antitonicity is the formal content of the slogan ``interesting
-orders shrink'': as subgoals grow toward the goal, the surrounding
-context contracts, so fewer properties remain observable.
-Exhaustion at the goal says that a completed solution has no future;
-only its cost matters.
-
-\begin{definition}[Remaining-interest assignment]
-\label{def:interest}
-A \emph{remaining-interest assignment} for a decomposition system
-$(X,\mathcal R,\goal)$ over a property domain $O$ is a map
-\[
-I : X \to \mathcal P(O)
-\]
-that is \emph{antitone} (order-reversing) with respect to the
-subgoal order:
-\[
-x\le_X y
-\quad\Longrightarrow\quad
-I(y)\subseteq I(x),
-\]
-and \emph{exhausted at the goal}: $I(\goal)=\varnothing$.
-\end{definition}
-
-\begin{example}[Interesting orders]
-\label{ex:interest}
-In Example~\ref{ex:query}, a sort order is relevant at a subgoal
-exactly when a join predicate involving its key remains to be
-applied above that subgoal:
-\[
-I(R)=\{a\},\quad
-I(S)=\{a,b\},\quad
-I(T)=\{b\},
-\]
-\[
-I(RS)=\{b\},\quad
-I(ST)=\{a\},\quad
-I(RST)=\varnothing.
-\]
-For instance, after $RS$ is formed, the only remaining join is on the
-$b$-key, so sortedness on $a$ can no longer be exploited:
-$a\notin I(RS)$.
-Antitonicity is visible along every edge, e.g.,
-$I(RS)\subseteq I(R)\cup\{b\}$\,---\,more precisely
-$I(RS)=\{b\}\subseteq I(S)$ and, along the $R$ branch,
-$I(RS)\cap I(R)=\varnothing$ records that $R$'s obligation $a$ was
-discharged by the join.
-\end{example}
-
-\begin{remark}[Determination reading]
-\label{rem:determination}
-Readers familiar with determination
-theory~\cite{hellerstein2026determination} will recognize the shape
-of Definition~\ref{def:interest}.
-The set $I(x)$ plays the role of \emph{remaining ambiguity}:
-the distinctions among solutions of $x$ that have not yet been
-rendered irrelevant.
-Extension of a subgoal acts like a commitment, irrevocably shrinking
-that ambiguity; an ``interesting order'' is an undischarged
-obligation, and choosing to retain representatives for each
-obligation is a deferred commitment.
-We keep the present development self-contained and return to this
-correspondence in Section~\ref{sec:determination-bridge}.
-\end{remark}
-
-\subsection{Property Bundles}
-\label{sec:bundles}
-
-The memo table at $x$ must answer for whatever the future may still
-demand of $x$, and the future's demands come in combinations:
-different continuations exploit different subsets of the remaining
-obligations $I(x)$.
-The memoization index is therefore not a single property but a
-\emph{bundle} of properties: a set of obligations to be discharged
-jointly.
-Nothing requires a bundle to be satisfiable---in the running
-example the bundle $\{a,b\}$ demands output sorted both ways, and
-the memo table will simply record that no plan provides it.
-(On the supply side, a single solution may also discharge several
-obligations at once, as when an operator's output is both sorted on
-one key and partitioned on another.)
-
-\begin{definition}[Bundle domain]
-\label{def:bundles}
-For each subgoal $x$, the \emph{bundle domain} is
-\[
-Q_x = \mathcal P(I(x)),
-\]
-the subsets of the remaining-relevant properties, ordered by
-inclusion, which we write $\sqsubseteq$.
-The bottom element is $\varnothing$ (no properties provided) and the
-binary join is union:
-\[
-q_1\sqcup q_2 = q_1\cup q_2 .
-\]
-\end{definition}
-
-\begin{example}[Bundle domains]
-\label{ex:bundles}
-In the running example,
-\[
-Q_S=\bigl\{\varnothing,\;\{a\},\;\{b\},\;\{a,b\}\bigr\},
-\qquad
-Q_{RS}=\bigl\{\varnothing,\;\{b\}\bigr\},
-\qquad
-Q_{RST}=\{\varnothing\}.
-\]
-\end{example}
-
-To motivate the next piece of machinery, imagine running the
-construction bottom-up, as Selinger's optimizer does.
-When a constructor assembles a plan for $RS$ from child plans for
-$R$ and $S$, the physical properties of its output are computable
-from those of its inputs: a merge join of $R_a$ and $S_a$ produces
-output sorted on $a$.
-But $a$ has just been discharged---no constructor above $RS$ can
-exploit it---so carrying it in the label would burden the memo key
-with a distinction no future can see.
-Two plans for $RS$ that differ only in such dead properties should
-occupy a single memo entry and compete on cost alone.
-The operational discipline is therefore: compute the raw output
-properties, then \emph{trim} them to the remaining interest of the
-subgoal under construction.
-The restriction maps are this trimming step; because interest only
-shrinks toward the goal, trimming is always well defined.
-
-\begin{definition}[Restriction maps]
-\label{def:restriction}
-For $x\le_X y$, define
-\[
-\rho_{x,y} : Q_x \to Q_y,
-\qquad
-\rho_{x,y}(D) = D\cap I(y).
-\]
-\end{definition}
-
-\begin{lemma}[Coherence of restriction]
-\label{lem:restriction}
-Each $\rho_{x,y}$ preserves joins and bottom, and the family is
-functorial, i.e., restrictions compose as expected:
-$\rho_{x,x}=\mathrm{id}$ and
-$\rho_{y,z}\circ\rho_{x,y}=\rho_{x,z}$ whenever
-$x\le_X y\le_X z$.
-\end{lemma}
-
-\begin{proof}
-Immediate from the definitions: intersection with a fixed set
-$I(y)$ preserves unions and the empty set, and
-$I(z)\subseteq I(y)$ gives functoriality.
-\end{proof}
-
-The bundle domains thus form a coherent family of
-\emph{join-semilattices}---posets in which every pair of elements
-has a least upper bound, or \emph{join}; here bundles are ordered by
-inclusion and the join of two bundles is their union---connected by
-the restriction maps.
-This is the precise form of monotone shrinkage.
-
-\subsection{Costs, Labels, and Frontiers}
-\label{sec:costs}
-
-We now attach quantitative and semantic data to solutions: each
-solution gets a cost, and a \emph{label} recording the bundle of
-remaining-relevant properties it provides.
-Bundles thus appear in two roles: as \emph{demands} (requirement
-bundles indexing the memo table) and as \emph{supplies} (labels of
-solutions); a solution \emph{satisfies} a requirement bundle when
-its supply covers the demand.
-In Selinger's setting the label is the sort order a plan advertises;
-in an e-graph it is the set of properties an analysis attaches to a
-candidate term.
-
-\begin{definition}[Costed, labeled solutions]
-\label{def:labels}
-A \emph{semantic labeling} of a decomposition system consists of, for
-each subgoal $x$:
-\begin{enumerate}
-\item a \emph{cost function}
-  $c_x : \Sol(x)\to\Rbar$, where
-  $\Rbar=[0,\infty]$; and
-\item a \emph{label map}
-  $\lambda_x : \Sol(x)\to Q_x$,
-  assigning each solution the bundle of remaining-relevant properties
-  it provides.
-\end{enumerate}
-A solution $s\in\Sol(x)$ \emph{satisfies} a bundle $q\in Q_x$ when
-$q\sqsubseteq\lambda_x(s)$.
-\end{definition}
-
-The object a dynamic program computes is what Bellman's tradition
-calls the \emph{value function}: here, the cost of the cheapest
-solution providing at least a given bundle.
-The only novelty relative to the classical notion is the index: the
-value function takes a requirement bundle as well as a subgoal.
-
-\begin{definition}[Value function]
-\label{def:value}
-For each subgoal $x$ and bundle $q\in Q_x$, define
-\[
-V_x(q)
-=
-\min\bigl\{\,c_x(s) : s\in\Sol(x),\; q\sqsubseteq\lambda_x(s)\,\bigr\},
-\]
-with $\min\varnothing = \infty$.
-\end{definition}
-
-\begin{definition}[Dominance and frontiers]
-\label{def:dominance}
-On costed bundles in $\Rbar\times Q_x$, say $(c,q)$ \emph{dominates}
-$(c',q')$ when $c\le c'$ and $q'\sqsubseteq q$: cheaper, and at least
-as capable.
-The \emph{memo frontier} at $x$ is the set of dominance-maximal pairs
-$\bigl(c_x(s),\lambda_x(s)\bigr)$ over $s\in\Sol(x)$, together with
-witnessing solutions.
-\end{definition}
-
-\begin{remark}[Cost--property Pareto tradeoff]
-\label{rem:pareto}
-A stronger label alone never licenses discarding a solution.
-A weaker-labeled but cheaper solution is dominance-incomparable with
-a stronger-labeled but costlier one, and both may be needed by
-different futures.
-The canonical memo object is therefore the frontier in
-$\Rbar\times Q_x$, \emph{not} a single best solution per property.
-Equivalently: the value function $V_x$ is antitone in $q$
-($q\sqsubseteq q' \Rightarrow V_x(q)\le V_x(q')$), and the frontier
-is a minimal representation of $V_x$.
-\end{remark}
-
-\begin{example}[Memo entries for $S$]
-\label{ex:memo}
-In the running example, $I(S)=\{a,b\}$ and the primitive solutions
-give labels
-\[
-\lambda_S(S_\bot)=\varnothing,
-\qquad
-\lambda_S(S_a)=\{a\},
-\qquad
-\lambda_S(S_b)=\{b\}.
-\]
-So the memo table for $S$ has logical entries
-\[
-V_S(\varnothing)=c(S_\bot)\wedge c(S_a)\wedge c(S_b),
-\quad
-V_S(\{a\})=c(S_a),
-\quad
-V_S(\{b\})=c(S_b),
-\quad
-V_S(\{a,b\})=\infty,
-\]
-the last because a single output stream is sorted on both keys only
-when the two orders happen to coincide on the data; no access method
-here provides that.
-This is precisely the Selinger phenomenon: the optimizer retains best
-plans $S_\bot$, $S_a$, and $S_b$ simultaneously, because they are
-dominance-incomparable.
-\end{example}
-
-\subsection{Semantic Constructors: the Bellman Condition}
-\label{sec:constructors}
-
-Everything so far describes a single subgoal in isolation.
-Bellman's principle is a statement about \emph{composition}: it holds
-when the behavior of a constructor depends on its children only
-through their memoized summaries.
-In our terms: two child solutions with the same label must be
-interchangeable in every context, except that the cheaper one is
-always at least as good.
-The following definition---the heart of the framework---captures
-this by requiring that both the label and the cost of a constructed
-solution be computable from the labels and costs of its children,
-via a \emph{property-transfer map} $F_r$ and a
-\emph{cost-composition map} $G_r$.
-This is the exact content of the Principle of Optimality, isolated
-as a property of the labeling rather than of the algorithm.
-
-\begin{definition}[Semantic factorization]
-\label{def:factorization}
-A semantic labeling \emph{factors} a decomposition system when for
-every constructor $r:(x_1,\ldots,x_k)\to x$ there exist:
-\begin{enumerate}
-\item a monotone \emph{property-transfer map}
-  \[
-  F_r : Q_{x_1}\times\cdots\times Q_{x_k}\;\to\;Q_x
-  \]
-  such that for all $s_i\in\Sol(x_i)$,
-  \[
-  \lambda_x\bigl(r(s_1,\ldots,s_k)\bigr)
-  =
-  F_r\bigl(\lambda_{x_1}(s_1),\ldots,\lambda_{x_k}(s_k)\bigr);
-  \]
-\item a \emph{cost-composition map}
-  \[
-  G_r : (Q_{x_1}\times\Rbar)\times\cdots\times(Q_{x_k}\times\Rbar)
-  \;\to\;\Rbar,
-  \]
-  monotone in each cost coordinate and antitone in each label
-  coordinate, such that for all $s_i\in\Sol(x_i)$,
-  \[
-  c_x\bigl(r(s_1,\ldots,s_k)\bigr)
-  =
-  G_r\bigl(
-  (\lambda_{x_1}(s_1),c_{x_1}(s_1)),
-  \ldots,
-  (\lambda_{x_k}(s_k),c_{x_k}(s_k))
-  \bigr).
-  \]
-\end{enumerate}
-\end{definition}
-
-\begin{remark}[The term ``factorization'']
-\label{rem:factors}
-The word carries its standard mathematical meaning: a map $g$
-\emph{factors through} a map $h$ when $g=f\circ h$ for some $f$,
-i.e., $g$ can be computed from $h$'s output alone.
-Condition (1) says that the composite-label map factors through the
-child labelings, with $F_r$ as the factor:
-\[
-\lambda_x\circ r
-=
-F_r\circ(\lambda_{x_1}\times\cdots\times\lambda_{x_k}),
-\]
-and condition (2) says the same for cost, through labels and costs
-jointly.
-Equivalently: the relation ``has the same label'' is a
-\emph{congruence} for every constructor---equivalent children yield
-equal-labeled parents---and $F_r$, $G_r$ are the operations induced
-on label classes.
-This is the algebraic content of Bellman's principle: a summary on
-which the operations of the algebra remain well defined.
-\end{remark}
-
-\begin{remark}[Why monotone?]
-\label{rem:monotone}
-Both variance conditions say the same thing: \emph{over-delivery of
-properties is never punished}.
-The memo answers a demand $q$ by covering---it returns the cheapest
-solution providing \emph{at least} $q$---so the recurrence may feed
-a constructor children that provide more than was demanded.
-Monotonicity of $F_r$ ensures richer inputs never shrink the output
-bundle; antitonicity of $G_r$ in the label coordinates ensures
-richer inputs never raise the cost.
-Both hold for classical fixed-algorithm operators, whose property
-propagation and cost are positive in their inputs' properties: an
-output property holds because input properties are preserved or
-created, never because one is absent.
-An \emph{adaptive} operator that switches algorithms based on input
-properties can violate both; the remedy is to model each algorithm
-as its own constructor, moving the choice into the search.
-If the conditions fail anyway, memoization by exact label (the
-general mult-egraph structure of Section~\ref{sec:multegraph})
-remains available; the variance conditions are precisely the license
-for the cheaper covering-based tables.
-\end{remark}
-
-\begin{example}[Transfer maps for joins]
-\label{ex:transfer}
-In the running example, with the bundle domains of
-Example~\ref{ex:bundles}:
 \begin{itemize}
-\item Nested-loop join $\NL:(R,S)\to RS$ requires nothing of its
-  inputs and (in the simplest model) destroys order:
-  \[
-  F_{\NL}(q_R, q_S) = \varnothing .
-  \]
-  (A variant that preserves the outer input's order is modeled by
-  $F(q_R,q_S)=\rho(q_R)$, with $\rho$ the restriction into $Q_{RS}$.)
-\item Merge join $\MJ:(R,S)\to RS$ is \emph{partial}: it is
-  applicable only to child bundles providing the join key, i.e.,
-  $a\in q_R$ and $a\in q_S$.
-  Its output is sorted on $a$, but $a\notin I(RS)$, so after
-  restriction
-  \[
-  F_{\MJ}(q_R,q_S) = \varnothing
-  \quad(\text{or } \{b\} \text{ if the physical operator preserves a
-  } b\text{-order of } S).
-  \]
-  Partial constructors are accommodated by splitting $r$ into one
-  total constructor per admissible combination of child bundles, or
-  equivalently by letting $G_r=\infty$ off the admissible region.
+\item a relational expression to be implemented;
+\item a program expression to be rewritten;
+\item a logical proposition to be established;
+\item an output value to be produced; or
+\item an abstract capability to be provided.
 \end{itemize}
-Cost composition $G_r$ is the usual estimated operator cost plus
-child costs, which is monotone in child costs.
+
+A goal specifies \emph{what} is to be realized, not how it is realized.
+
+Let \(X\) be a finite set of goals.  For each \(x \in X\), let
+\[
+\mathsf{N}(x)
+\]
+denote the finite set of e-nodes associated with \(x\).
+
+\begin{definition}[E-node]
+An \emph{e-node} for a goal \(x\) is one admissible local realization
+of \(x\).
+\end{definition}
+
+Thus every e-node belongs to exactly one goal.  We write
+\[
+n : x
+\]
+to mean that \(n \in \mathsf{N}(x)\).
+
+An e-node is a local realization of its goal.  A non-atomic e-node
+specifies its operator and the semantic requirements on its children,
+without selecting particular child realizations.
+
+For now, we distinguish only two cases.
+
+\begin{definition}[Atomic and non-atomic e-nodes]
+An e-node is \emph{atomic} if its realization requires no subordinate
+goals.  It is \emph{non-atomic} otherwise.
+\end{definition}
+
+This distinction records whether an alternative is compositionally
+closed, but does not yet specify its children.
+
+\begin{example}[Relational query optimization]
+Consider the goal
+\[
+x_{R \Join S}
+\]
+of producing the relation \(R \Join S\).
+
+Possible e-nodes for this goal include
+\[
+\mathsf{HashJoin(x_R, x_S)},
+\qquad
+\mathsf{MergeJoin(x_R, x_S)},
+\qquad
+\mathsf{NestedLoopJoin(x_R, x_S)}.
+\]
+
+These are different local realizations of the same goal.  They are
+non-atomic because each depends on realizations of the input goals
+\(x_R\) and \(x_S\).
+
+A table scan for \(R\), by contrast, may be represented by an atomic
+e-node for the goal \(x_R\).
 \end{example}
 
-\subsection{Semantic Memoization and the Lifted Recurrence}
-\label{sec:recurrence}
-
-A factored labeling supports dynamic programming over bundles: to
-meet a requirement $q$ at subgoal $x$, either a primitive solution
-satisfies $q$ directly, or some constructor into $x$ can be fed
-child bundles whose transferred output covers $q$, in which case the
-children are obtained recursively at their cheapest.
-The recurrence minimizes over both cases.
-
-\begin{definition}[Lifted Bellman recurrence]
-\label{def:recurrence}
-Given a factored semantic labeling, define
-$\widehat V_x : Q_x\to\Rbar$ for each subgoal $x$ by structural
-recursion over the (acyclic) decomposition system:
+\begin{example}[Equality saturation]
+For the goal represented by the expression \(a(b+c)\), possible
+e-nodes may include
 \[
-\widehat V_x(q)
-=
-\min\left(
-\begin{aligned}
-&\min\bigl\{\,c_x(s) : s\in\Prim(x),\ q\sqsubseteq\lambda_x(s)\,\bigr\},
-\\[2pt]
-&\min_{\substack{
-r:(x_1,\ldots,x_k)\to x\\
-q_i\in Q_{x_i}\;:\;q\sqsubseteq F_r(q_1,\ldots,q_k)
-}}
-G_r\bigl(
-(q_1,\widehat V_{x_1}(q_1)),
-\ldots,
-(q_k,\widehat V_{x_k}(q_k))
-\bigr)
-\end{aligned}
-\right).
+\mathsf{Mul}(a,b+c)
+\qquad\text{and}\qquad
+\mathsf{Add}(ab,ac).
 \]
-\end{definition}
 
-In practice one enumerates only the child bundles realized on the
-memo frontier; dominance pruning (Remark~\ref{rem:pareto}) keeps the
-tables small.
-At the goal, $Q_{\goal}=\{\varnothing\}$ and
-$\widehat V_{\goal}(\varnothing)$ is the value of the optimization
-problem; the corresponding witness is the extracted solution.
-In e-graph terms, the recurrence is extraction with a per-class
-frontier: instead of tabulating one cheapest term per e-class, the
-extractor tabulates the cheapest term per property bundle.
-
-\begin{example}[One turn of the crank]
-\label{ex:crank}
-We compute the memo entries for $RS$ in the running example.
-Take toy scan costs
-\[
-c(R_\bot)=8,\quad c(R_a)=9,\qquad
-c(S_\bot)=10,\quad c(S_a)=12,\quad c(S_b)=13,
-\]
-so the child tables read
-$\widehat V_R(\varnothing)=8$, $\widehat V_R(\{a\})=9$,
-$\widehat V_S(\varnothing)=10$, $\widehat V_S(\{a\})=12$,
-$\widehat V_S(\{b\})=13$.
-Suppose nested-loop join adds $20$ to the sum of its input costs and
-merge join adds $5$, with the transfer maps of
-Example~\ref{ex:transfer} (both joins produce
-$\varnothing\in Q_{RS}$; merge join requires $a$ in both inputs).
-
-For the requirement $q=\varnothing$:
-\begin{itemize}
-\item via $\NL$, any child bundles suffice, and taking the cheapest
-  children gives $8+10+20=38$;
-\item via $\MJ$, the only admissible child bundles are
-  $q_R=\{a\}$, $q_S=\{a\}$, giving $9+12+5=26$.
-\end{itemize}
-So $\widehat V_{RS}(\varnothing)=26$, witnessed by the merge join of
-sorted scans.
-For the requirement $q=\{b\}$: no constructor into $RS$ produces a
-bundle containing $b$, so $\widehat V_{RS}(\{b\})=\infty$.
-The machinery has discovered that a $b$-ordered $RS$ is unrealizable
-with this operator inventory: a merge join on $b$ at the top would
-require enriching the constructors, say with an order-preserving
-join variant or an explicit sort operator.
-This is exactly the bookkeeping a Selinger optimizer performs; the
-recurrence merely does it uniformly.
+Both realize the same goal.  Their subordinate structure will later be
+represented through references to semantic classes of child goals.
 \end{example}
 
-Theorem~\ref{thm:exactness} below asserts that
-$\widehat V_x = V_x$: the lifted recurrence is exact.
-
-\subsection{A Refinement of the Model: Ordered Properties}
-\label{sec:refinement}
-
-The Boolean model treats properties as independent.
-In practice, properties often subsume one another: a table sorted
-lexicographically on $(a,b)$ is in particular sorted on $a$, so a
-solution providing the former satisfies every requirement on the
-latter.
-The Boolean model can encode subsumption only by convention---every
-label and transfer map must remember to list all implied
-properties---and nothing enforces that the convention is followed.
-We now refine the model to make subsumption first-class: the
-property domain acquires a partial order, and bundles are required
-to be closed under it.
-Everything established so far will carry over unchanged.
-
-\begin{definition}[Ordered property domain]
-\label{def:ordered-domain}
-An \emph{ordered property domain} is a finite poset $(O,\preceq)$.
-We read $a\preceq b$ as ``$b$ refines (subsumes) $a$'': any use of a
-solution that is satisfied by property $a$ is also satisfied by
-property $b$.
-\end{definition}
-
-\begin{example}[Refinable properties]
-\label{ex:refinable-properties}
-Lexicographic sort orders give a nontrivial refinement order:
+At this point, the schema contains only the disjoint family
 \[
-\mathrm{sorted}(a)\;\preceq\;\mathrm{sorted}(a,b).
+\{\mathsf{N}(x)\}_{x\in X}
 \]
-Other naturally ordered property domains include partitioning
-schemes (refined by co-partitioning), streamability, and
-provenance-preservation.
-\end{example}
+of alternatives associated with each goal.
 
-Bundles must now respect refinement: a solution providing a property
-implicitly provides everything that property subsumes, so a bundle
-is a set closed downward under $\preceq$.
-Such sets are determined by their maximal elements, which gives a
-compact representation.
+Nothing yet identifies two e-nodes as equivalent, and nothing yet says
+how a non-atomic e-node depends on subordinate alternatives.  Those two
+pieces of structure will be introduced separately:
 
-\begin{convention}[Downsets and antichains]
-\label{conv:downsets}
-For a poset $(O,\preceq)$ and $o\in O$, write
-$\mathord{\downarrow}o = \{o'\in O : o'\preceq o\}$, and for
-$A\subseteq O$ write
-$\mathord{\downarrow}A=\bigcup_{o\in A}\mathord{\downarrow}o$.
-A set $D\subseteq O$ is a \emph{downset} if
-$D = \mathord{\downarrow}D$; we write $\Down(O)$ for the set of
-downsets of $O$.
-An \emph{antichain} is a set of pairwise incomparable elements; we
-write $\Ant(O)$ for the antichains of $O$.
-Since $O$ is finite, the maps
-$D\mapsto\max(D)$ and $A\mapsto\mathord{\downarrow}A$
-are mutually inverse bijections between $\Down(O)$ and $\Ant(O)$.
-\end{convention}
-
-Figure~\ref{fig:antichains} illustrates the correspondence: each
-antichain generates its downset, and each downset is recovered from
-its maximal elements.
-
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[
-  every node/.style={draw, circle, inner sep=1.5pt, minimum size=15pt},
-  dn/.style={fill=black!15},
-  ac/.style={fill=black!15, very thick}]
-  \node[dn]  (a) at (0,0)     {$a$};
-  \node[dn]  (b) at (1.2,0)   {$b$};
-  \node[ac]  (c) at (2.4,0)   {$c$};
-  \node[ac]  (d) at (0.6,1.2) {$d$};
-  \node      (e) at (1.8,1.2) {$e$};
-  \draw (a)--(d) (b)--(d) (b)--(e) (c)--(e);
-\end{tikzpicture}
-\qquad\qquad
-\begin{tikzpicture}[
-  every node/.style={draw, circle, inner sep=1.5pt, minimum size=15pt},
-  dn/.style={fill=black!15},
-  ac/.style={fill=black!15, very thick}]
-  \node[ac]  (a) at (0,0)     {$a$};
-  \node[dn]  (b) at (1.2,0)   {$b$};
-  \node[dn]  (c) at (2.4,0)   {$c$};
-  \node      (d) at (0.6,1.2) {$d$};
-  \node[ac]  (e) at (1.8,1.2) {$e$};
-  \draw (a)--(d) (b)--(d) (b)--(e) (c)--(e);
-\end{tikzpicture}
-\Description{Two copies of the same five-element Hasse diagram with
-elements a, b, c on the bottom row and d, e on the top row, where d
-covers a and b, and e covers b and c. In the left copy the antichain
-consisting of c and d is drawn with bold outlines and its downset a,
-b, c, d is shaded. In the right copy the antichain consisting of a
-and e is drawn with bold outlines and its downset a, b, c, e is
-shaded.}
-\caption{Two antichains (bold outline) and their downsets (shaded)
-in the same five-element poset, drawn as a Hasse diagram with
-smaller elements below.
-Left: the antichain $A=\{c,d\}$ generates the downset
-$\mathord{\downarrow}A=\{a,b,c,d\}$.
-Right: $A'=\{a,e\}$ generates
-$\mathord{\downarrow}A'=\{a,b,c,e\}$.
-In each case the antichain is exactly the set of maximal elements of
-its downset, witnessing the bijection of
-Convention~\ref{conv:downsets}.}
-\label{fig:antichains}
-\end{figure}
-
-\begin{definition}[Ordered bundle domain]
-\label{def:down-bundles}
-Over an ordered property domain $(O,\preceq)$, a remaining-interest
-assignment takes values in $\Down(O)$, and the bundle domain at
-subgoal $x$ is
-\[
-Q_x = \Down(I(x)),
-\]
-the downsets of the restriction of $(O,\preceq)$ to $I(x)$, ordered
-by inclusion $\sqsubseteq$, with bottom $\varnothing$ and join
-$D_1\sqcup D_2 = D_1\cup D_2$.
-In antichain representation (Convention~\ref{conv:downsets}), a
-bundle is its antichain of maximal elements, and
-\[
-A_1\sqcup A_2 = \max(A_1\cup A_2),
-\]
-i.e., union followed by removal of subsumed elements.
-\end{definition}
-
-\begin{remark}[Conservativity]
-\label{rem:conservative}
-When $O$ is discrete (trivially ordered), every subset is a downset,
-so $\Down(O)=\mathcal P(O)$ and the definitions of this subsection
-collapse to the Boolean model of
-Sections~\ref{sec:properties}--\ref{sec:bundles}.
-Conversely, nothing downstream needs revisiting: the definitions of
-labels, dominance, semantic factorization, and the lifted recurrence
-(Sections~\ref{sec:costs}--\ref{sec:recurrence}), together with
-Lemma~\ref{lem:restriction}, use only the join-semilattice structure
-$(\sqsubseteq,\sqcup,\varnothing)$ of $Q_x$ and the restriction maps
-$D\mapsto D\cap I(y)$, all of which are available verbatim over
-downsets.
-Theorem~\ref{thm:free} in the next section explains in what sense
-this completion is canonical.
-\end{remark}
-
-\begin{example}
-In the domain of Example~\ref{ex:refinable-properties}, the bundle
-$\mathord{\downarrow}\{\mathrm{sorted}(a,b)\}$ contains
-$\mathrm{sorted}(a)$ automatically: a plan advertising the refined
-order satisfies every requirement on the coarser one, with no
-bookkeeping in $\lambda$ or $F_r$.
-\end{example}
-
-\subsection{Continuation Equivalence}
-\label{sec:continuation}
-
-The definitions so far take the property domain and labeling as
-given.
-To \emph{characterize} Bellman's principle---rather than merely
-exploit it---we need an intrinsic notion of when two solutions are
-interchangeable, defined without reference to any chosen property
-vocabulary.
-The role of ``the future of a solution'' is played by
-\emph{contexts}: solutions of the goal with a hole into which a
-solution of $x$ may be plugged.
-
-\begin{definition}[Contexts]
-\label{def:contexts}
-For a subgoal $x$, a \emph{context} for $x$ is a solution term for
-the goal $\goal$ with a single hole of sort $x$: formally, an element
-of $\Sol(\goal)$ in the decomposition system extended with a fresh
-primitive solution $[\,\cdot\,]_x\in\Prim(x)$ that is used exactly
-once.
-Write $\Ctx(x)$ for the set of contexts for $x$, and $C[s]$ for the
-solution obtained by plugging $s\in\Sol(x)$ into the hole.
-\end{definition}
-
-We then deem two solutions equivalent when swapping one for the
-other inside any complete solution leaves the rest of the cost
-unchanged: no context can tell them apart, so no optimizer ever
-needs to distinguish them.
-Collecting the solutions of $x$ into equivalence classes yields a
-\emph{quotient} of $\Sol(x)$: the set whose elements are the
-classes themselves.
-Readers who recall automata theory will recognize a
-Myhill--Nerode-style construction: it quotients solutions by their
-future behavior, just as Myhill--Nerode quotients string prefixes by
-their acceptance futures.
-
-\begin{definition}[Continuation equivalence]
-\label{def:continuation}
-For $s,t\in\Sol(x)$, define
-\[
-s \equiv_x t
-\quad\Longleftrightarrow\quad
-\forall C\in\Ctx(x):\;
-c_{\goal}(C[s]) - c_x(s)
-\;=\;
-c_{\goal}(C[t]) - c_x(t),
-\]
-with the convention that $\infty-\infty$ cases are handled by
-requiring instead that feasibility and incremental cost agree.
-The quotient
-\[
-K_x = \Sol(x)/{\equiv_x}
-\]
-is the \emph{continuation quotient} at $x$.
-\end{definition}
-
-Continuation equivalence gives a yardstick for labelings.
-A labeling is \emph{sufficient} when it refines the continuation
-quotient---it may distinguish more than necessary, but never
-less---and \emph{exact} when it distinguishes precisely what the
-quotient does.
-
-\begin{definition}[Sufficient and exact labelings]
-\label{def:sufficient}
-A label map $\lambda_x$ is \emph{Bellman-sufficient} when
-\[
-\lambda_x(s)=\lambda_x(t)
-\quad\Longrightarrow\quad
-s\equiv_x t,
-\]
-and \emph{exact} when the converse implication also holds, in which
-case the image of $\lambda_x$ is in bijection with $K_x$ (restricted
-to realized labels).
-\end{definition}
-
-Selinger's interesting orders are a Bellman-sufficient labeling for
-System~R's cost model; whether they are exact depends on the operator
-inventory.
-The conjectures of Section~\ref{sec:results} assert that $K_x$ is
-itself the canonical semantic domain.
-
-\subsection{The Framework at a Glance}
-\label{sec:glance}
-
-Table~\ref{tab:instances} summarizes the framework by instantiating
-each concept in three settings: the two motivating applications, and
-the cost terrains of local search, developed in
-Section~\ref{sec:terrain}.
-In the local-search column, note that terrain points are
-\emph{complete} solutions; subgoals appear in the neighborhood
-function, as the sites that local moves rewrite.
-Readers fluent in one column can use it as a dictionary for the
-others.
-
-\begin{table}[t]
-\caption{The abstract framework and three instances.}
-\label{tab:instances}
-\footnotesize
-\begin{tabular}{@{}llll@{}}
-\toprule
-Framework concept & Query optimization & Equality saturation &
-Local search \\
-\midrule
-subgoal $x$ & join subexpression & e-class & site of a local move \\
-constructor $r$ & physical join operator & e-node &
-piece composition (fixed by moves) \\
-primitive solution & access method (scan) & childless e-node &
-smallest swappable piece \\
-goal $\goal$ & the full query & root e-class &
-whole problem (points $=$ its solutions) \\
-solution $s\in\Sol(x)$ & physical plan & extractable term &
-swappable piece \\
-property $o\in O$ & canonicalized sort key & analysis fact &
-feature of a piece \\
-interest $I(x)$ & interesting orders at $x$ &
-properties usable above $x$ & features contexts can exploit \\
-label $\lambda_x(s)$ & plan's advertised orders &
-term's derived properties & the piece's features \\
-memo frontier & best plan per order bundle &
-term frontier per class & incomparable pieces (ridge sources) \\
-recurrence $\widehat V$ & System~R DP &
-property-indexed extraction & frontier DP replacing the walk \\
-equivalence $\equiv_x$ & interchangeable subplans &
-interchangeable terms & safely swappable pieces \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Results}
-\label{sec:results}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-We organize the intended results as a ladder: an exactness theorem
-whose proof is routine but which isolates the Bellman condition; a
-free-completion theorem explaining why bundle domains and antichain
-frontiers are canonical; the recovery of Selinger's algorithm as the
-discrete instance; two conjectures---universality and
-minimality---that would characterize Bellman's principle in full;
-and a quantitative agenda: since every decomposition system can be
-lifted to satisfy Bellman's principle
-(Proposition~\ref{prop:trivial}), the
-intrinsic measures of a problem are the \emph{width} and
-\emph{dimension} of a minimal sufficient frontier.
-
-\subsection{Exactness of Semantic Memoization}
-
-\begin{theorem}[Bellman sufficiency]
-\label{thm:exactness}
-Let $(X,\mathcal R,\goal)$ be a decomposition system with a semantic
-labeling that factors it (Definition~\ref{def:factorization}).
-Then for every subgoal $x$ and every bundle $q\in Q_x$,
-\[
-\widehat V_x(q) = V_x(q).
-\]
-In particular, $\widehat V_{\goal}(\varnothing)$ is the optimum cost
-of the problem.
-\end{theorem}
-
-\begin{proof}[Proof sketch]
-Structural induction over the decomposition DAG.
-
-($\widehat V_x(q)\ge V_x(q)$, soundness.)
-Every term considered by the recurrence corresponds to a concrete
-solution: primitive solutions directly, and constructor terms by
-choosing, for each child bundle $q_i$, a witness
-$s_i$ with $q_i\sqsubseteq\lambda_{x_i}(s_i)$ and
-$c_{x_i}(s_i)=\widehat V_{x_i}(q_i)$ (inductively $=V_{x_i}(q_i)$).
-Monotonicity of $F_r$ gives
-$q\sqsubseteq F_r(q_1,\ldots,q_k)
-\sqsubseteq
-F_r(\lambda(s_1),\ldots,\lambda(s_k))
-=\lambda_x(r(s_1,\ldots,s_k))$,
-so the constructed solution satisfies $q$.
-Its cost is at most the value computed: the witnesses' labels
-$\lambda_{x_i}(s_i)\sqsupseteq q_i$ cannot raise the cost
-(antitonicity of $G_r$ in labels), and their costs equal the
-memoized values (monotonicity of $G_r$ in costs).
-
-($\widehat V_x(q)\le V_x(q)$, completeness.)
-Let $s$ be a cheapest solution of $x$ satisfying $q$.
-If $s$ is primitive, the first branch of the recurrence covers it.
-Otherwise $s=r(s_1,\ldots,s_k)$; take
-$q_i=\lambda_{x_i}(s_i)$.
-Then $q\sqsubseteq\lambda_x(s)=F_r(q_1,\ldots,q_k)$, so this tuple is
-enumerated.
-By induction $\widehat V_{x_i}(q_i)\le c_{x_i}(s_i)$, and
-monotonicity of $G_r$ yields a recurrence value at most $c_x(s)$.
-\end{proof}
-
-The theorem is deliberately modest: it converts the informal
-Principle of Optimality into a checkable condition on labelings
-(factorization) and locates the entire burden there.
-All domain-specific content of a Selinger-style optimizer resides in
-the choice of $(O,\preceq)$, $I$, $F_r$, and $G_r$.
-
-\subsection{The Bundle Domain is a Free Completion}
-
-\begin{theorem}[Free join-semilattice completion]
-\label{thm:free}
-Let $(P,\preceq)$ be a finite poset.
-Then $(\Down(P),\subseteq,\cup,\varnothing)$, together with the
-embedding $\eta:P\to\Down(P)$, $\eta(p)=\mathord{\downarrow}p$, is
-the free join-semilattice (with bottom) on $P$: for every
-join-semilattice $L$ with bottom and every monotone map
-$f:P\to L$, there is a unique bottom- and join-preserving
-homomorphism $\widehat f:\Down(P)\to L$ with
-$\widehat f\circ\eta=f$, namely
-\[
-\widehat f(D)=\bigvee_{p\in\max(D)}f(p).
-\]
-\end{theorem}
-
-\begin{proof}[Proof sketch]
-Standard.
-Well-definedness and homomorphism properties follow from
-$D=\bigcup_{p\in\max D}\mathord{\downarrow}p$ and monotonicity of
-$f$; uniqueness because the $\eta(p)$ generate $\Down(P)$ under
-finite joins.
-\end{proof}
-
-In plain terms: the powerset and downset constructions add exactly
-one capability to the property domain---the ability to hold several
-incomparable alternatives open at once---and nothing else.
-Any summary domain that can combine alternatives at all must contain
-this one; any smaller summary must conflate alternatives that some
-constructor may later treat differently
-(Remark~\ref{rem:top} below makes the failure concrete).
-This is the precise sense in which the memo tables of
-Section~\ref{sec:foundations} are forced rather than chosen.
-
-\begin{corollary}[Discrete case]
-\label{cor:discrete}
-When $P$ is discrete, $\Down(P)=\mathcal P(P)$: the free
-join-semilattice on a set is its powerset under union.
-Hence the Boolean bundle domains of Definition~\ref{def:bundles} and
-the ordered bundle domains of Definition~\ref{def:down-bundles} are
-the same construction at different degrees of semantic refinement,
-and the passage from the Boolean model to the ordered model in
-Section~\ref{sec:refinement} is not an ad hoc generalization but the
-free completion of the refinement order.
-\end{corollary}
-
-\begin{remark}[Why a top element fails]
-\label{rem:top}
-Freeness explains a design point.
-One might hope to summarize incomparable alternatives
-$\{p_1,\ldots,p_k\}$ by a single formal top element
-(``undetermined'').
-But collapsing all antichains to $\top$ identifies
-$\{a,b\}$, $\{a,c\}$, and $\{a,b,c\}$, so property-transfer maps can
-no longer act differently on them, and factorization
-(Definition~\ref{def:factorization}) fails for any constructor that
-consumes one alternative but not another.
-The downset completion adds exactly the joins forced by incomparable
-bundles and nothing else; it is the least completion compatible with
-deferred commitment.
-\end{remark}
-
-\subsection{Selinger as the Discrete Instance}
-
-\begin{proposition}[System~R]
-\label{prop:selinger}
-Selinger-style join-order optimization with interesting orders is the
-instance of Theorem~\ref{thm:exactness} with:
-$X$ the connected subexpressions of the join graph;
-constructors the physical join operators;
-$O$ the discrete poset of canonicalized sort keys mentioned in join
-predicates and \textup{ORDER BY}/\textup{GROUP BY} clauses;
-$I(x)$ the keys occurring in predicates and clauses not yet applied
-at $x$;
-$\lambda$ the advertised output orders of plans;
-$F_r$ the standard physical-property propagation rules; and
-$G_r$ the standard cost model.
-The interesting-order memo table of System~R computes exactly the
-frontier of Definition~\ref{def:dominance}.
-\end{proposition}
-
-\begin{proof}[Proof obligations]
-Routine but worth recording in full: (i) the property propagation of
-each physical operator factors through output-order labels
-(Definition~\ref{def:factorization}(1)); (ii) estimated operator
-costs are monotone in child costs
-(Definition~\ref{def:factorization}(2)); (iii) $I$ is antitone and
-exhausted at the root.
-Example~\ref{ex:transfer} verifies (i) for nested-loop and merge
-joins in the running example.
-\end{proof}
-
-\subsection{Universality}
-
-Theorem~\ref{thm:exactness} shows that a semantic factorization
-suffices for Bellman's principle.
-The deeper question is necessity: is \emph{every} dynamic program
-that satisfies Bellman's principle of this form?
-To pose the question precisely we use the intrinsic quotient of
-Section~\ref{sec:continuation}.
-
-\begin{conjecture}[Universality]
-\label{conj:universality}
-Let $(X,\mathcal R,\goal)$ be a decomposition system with costs
-$c_x:\Sol(x)\to\Rbar$ (and no given labeling).
-Then the continuation quotients $K_x$ support a semantic
-factorization: there exist a finite ordered property domain
-$(O,\preceq)$,
-an antitone remaining-interest assignment $I$, and an exact labeling
-$\lambda$ (Definition~\ref{def:sufficient}) factoring the system,
-with $Q_x$-labels in bijection with the realized classes of $K_x$.
-Consequently, a decomposition problem admits an exact
-property-indexed dynamic program if and only if its continuation
-quotients are (uniformly) small.
-\end{conjecture}
-
-The ``if'' direction is Theorem~\ref{thm:exactness}.
-The substance is the converse: constructing $(O,\preceq)$ and $I$
-from the quotients $K_x$ alone.
-We expect the construction to hinge on one structural condition
-beyond monotonicity: \emph{incremental} Bellman compatibility, the
-requirement that retaining two alternative bundles and constructing
-afterward agrees with constructing from each bundle and joining the
-results.
-
-\begin{definition}[Join-compositionality]
-\label{def:join-comp}
-A property-transfer map $F_r$ is \emph{join-compositional} when it
-preserves joins separately in each argument:
-\[
-F_r(\ldots,q_i\sqcup q_i',\ldots)
-=
-F_r(\ldots,q_i,\ldots)\sqcup F_r(\ldots,q_i',\ldots).
-\]
-\end{definition}
-
-The natural candidate is to let properties be (generated by) the
-continuation classes themselves and to let $I$ record which classes
-remain distinguishable above each subgoal; the work is to show that
-constructors descend to the quotients and that the resulting
-transfer maps are monotone and, we expect, join-compositional.
-
-\subsection{Minimality}
-
-Among Bellman-sufficient labelings, the continuation quotient should
-be canonical.
-
-\begin{conjecture}[Minimality]
-\label{conj:minimality}
-The quotient map $\kappa_x:\Sol(x)\to K_x$ is the coarsest
-Bellman-sufficient summary: for every Bellman-sufficient labeling
-$\lambda_x:\Sol(x)\to Q_x$ there is a unique map
-$h_x:\lambda_x(\Sol(x))\to K_x$ with
-$\kappa_x = h_x\circ\lambda_x$, and the family $\{h_x\}$ commutes
-with the property-transfer maps and restriction maps.
-Thus every semantic factorization factors through the continuation
-quotients, which are initial among Bellman-valid semantic domains.
-\end{conjecture}
-
-Conjectures~\ref{conj:universality} and~\ref{conj:minimality}
-together would give a Myhill--Nerode theorem for dynamic programming:
-Bellman's principle holds exactly when future distinguishability has
-a finite compositional representation, and the continuation quotient
-is its minimal automaton.
-Selinger's interesting orders, Cascades' property requests, and
-e-graph extraction frontiers would then be different coordinate
-systems on the same canonical object.
-
-\subsection{The Price of Bellman: Width and Dimension}
-\label{sec:width}
-
-The informal claim of Section~\ref{sec:motivation} was deliberately
-strong: every compositionally presented problem can be made to
-satisfy Bellman's principle.
-That is not a conjecture; it is a nearly trivial proposition, and
-its triviality is the point.
-One honest hedge is required: the framework takes the
-decomposition---the subgoals and constructors---as given, and
-choosing a good decomposition is itself part of the art, outside the
-scope of the present theory.
-Within any fixed decomposition, however, sufficiency is automatic.
-
-Here is the simple idea underneath the syntax.
-Bellman's principle fails when a summary forgets something the
-future can see.
-A summary that forgets \emph{nothing} therefore cannot fail: let
-each solution's ``property'' be its own identity, so that a
-solution's label says, in effect, ``I am exactly this solution.''
-Labels then trivially determine the label and cost of anything built
-from them, which is all that factorization demands.
-The formal statement below merely arranges these identity properties
-to meet the bookkeeping requirements of
-Definition~\ref{def:interest}: interest must shrink going up (so a
-solution's identity is ``relevant'' at all subgoals below its own)
-and must be empty at the goal (so goal solutions are labeled by
-nothing, which is harmless because nothing is built from them).
-
-\begin{proposition}[Sufficiency is always achievable]
-\label{prop:trivial}
-Every decomposition system with costs admits a semantic
-factorization.
-In particular, take
-$O = \{(x,s) : x\in X\setminus\{\goal\},\ s\in\Sol(x)\}$,
-$I(x) = \{(y,s)\in O : x\le_X y\}$, and
-$\lambda_x(s)=\{(x,s)\}$ for $x\neq\goal$
-(with $\lambda_{\goal}\equiv\varnothing$).
-\end{proposition}
-
-\begin{proof}[Proof sketch]
-Antitonicity of $I$ is transitivity of $\le_X$, and $I(\goal)$
-avoids the excluded goal pairs.
-Each label identifies its solution exactly, so
-$F_r(\{(x_1,s_1)\},\ldots,\{(x_k,s_k)\})
-=\{(x,\,r(s_1,\ldots,s_k))\}$ (or $\varnothing$ at the goal) and
-$G_r$ reconstructs the composite term and evaluates its cost;
-both factor through labels by construction.
-\end{proof}
-
-This lift is useless in practice: the memo tables are as large as
-the solution spaces themselves.
-The lesson is that Bellman's principle is never \emph{unavailable};
-it is only \emph{expensive}.
-The substantive question is quantitative---how large must a
-sufficient frontier be?---and the continuation quotient supplies the
-yardstick.
-
-\begin{definition}[Bellman width]
-\label{def:width}
-The \emph{width} of a subgoal $x$ is $w(x)=|K_x|$, the number of
-continuation classes at $x$; the width of the problem is
-$\max_{x\in X} w(x)$.
-\end{definition}
-
-\begin{definition}[Bellman dimension]
-\label{def:dimension}
-The \emph{(Boolean) dimension} of a problem is the least $|O|$ over
-all Boolean semantic factorizations whose labeling is
-Bellman-sufficient; the \emph{ordered dimension} is defined likewise
-over ordered property domains.
-\end{definition}
-
-\begin{proposition}[Basic bounds; to be proved in full]
-\label{prop:bounds}
 \begin{enumerate}
-\item Every Bellman-sufficient labeling realizes at least $w(x)$
-  distinct labels at $x$; hence $w(x)$ lower-bounds the size of any
-  exact memo table at $x$.
-\item In the Boolean model, realized labels at $x$ are subsets of
-  $I(x)$, so $|I(x)|\ge\log_2 w(x)$, and the Boolean dimension is at
-  least $\max_x\lceil\log_2 w(x)\rceil$.
-\item The lifted recurrence runs in time
-  $O\bigl(\sum_{r:(x_1,\ldots,x_k)\to x}\prod_{i} f(x_i)\bigr)$
-  evaluations of the transfer and cost maps, where $f(x_i)$ is the
-  frontier size at $x_i$.
+\item multe-classes will identify semantically interchangeable
+      alternatives; and
+\item the multe-graph will allow non-atomic e-nodes to reference
+      multe-classes of subordinate goals.
 \end{enumerate}
-Consequently, dynamic programming is efficient exactly when widths
-are small: polynomial width gives polynomial-size memo tables, and
-exponential width forbids them.
-\end{proposition}
 
-\begin{example}[Held--Karp width]
-\label{ex:heldkarp}
-The traveling salesperson problem fits the framework with subgoals
-$x_k$ = ``simple paths visiting $k$ cities from a fixed start,''
-constructors extending a path by one city, and the goal being
-complete tours.
-For generic edge weights, two partial paths are
-continuation-equivalent if and only if they visit the same city set
-and end at the same city, so
-$w(x_k)=\binom{n}{k}\,k$: the width is exponential in $n$.
-The Held--Karp dynamic program~\cite{heldkarp1962} memoizes exactly
-these classes, so it is the canonical lift---and its $2^n$ table is
-not an artifact of a weak state choice but the price the problem
-demands (at least among property-indexed dynamic programs).
-Selinger's problem, by contrast, has width bounded by the number of
-realizable order bundles, which is small for typical queries.
-Characterizing which problems have polynomial width is, we believe,
-the right abstract form of the question ``when does dynamic
-programming work?''
-\end{example}
-
-\begin{openproblem}[Compositionality gap]
-\label{open:gap}
-The bound of Proposition~\ref{prop:bounds}(2) is
-information-theoretic: $\lceil\log_2 w\rceil$ properties suffice to
-\emph{name} the continuation classes, but labels must also factor
-through every constructor
-(Definition~\ref{def:factorization}), which may force more
-properties.
-Determine how large the gap between the compositional dimension and
-$\lceil\log_2 w\rceil$ can be, and identify structural conditions
-under which the information-theoretic bound is achieved.
-\end{openproblem}
-
-\begin{openproblem}[Small-width problems]
-\label{open:width}
-Characterize the decomposition systems (or problem families) of
-polynomial width.
-Such a characterization would delimit, in one vocabulary, the
-problems for which Selinger-style dynamic programming, Cascades-style
-memoization, and frontier-indexed e-graph extraction can be
-efficient.
-\end{openproblem}
-
-\subsection{Cost Terrains and Local Search}
-\label{sec:terrain}
-
-A third setting motivated this work: discrete non-convex
-optimization over a \emph{cost terrain}, as navigated by local
-search and Monte Carlo methods.
-A terrain is a graph whose points are \emph{complete} solutions,
-with an edge between two points when a single local move transforms
-one into the other, and with the objective as elevation.
-In the vocabulary of this paper, the points are $\Sol(\goal)$, and
-the moves are \emph{context-preserving substitutions}: writing the
-current point as $C[s]$ for a context $C\in\Ctx(x)$ and piece
-$s\in\Sol(x)$, a move replaces the piece, yielding the neighbor
-$C[t]$ for some $t\in\Sol(x)$.
-Practical move sets---swaps, rotations, 2-opt---restrict which
-subgoals $x$ and replacement pieces $t$ are eligible, but they all
-have this shape.
-Subgoals therefore do not appear as terrain points; they index the
-\emph{neighborhood function}: a swap at one subgoal is an edge
-between two complete solutions.
-
-\begin{remark}[Substitution monotonicity; to be proved]
-\label{rem:terrain-mono}
-Under a semantic factorization, swapping in an equal-labeled,
-cheaper piece never increases total cost: if
-$\lambda_x(t)=\lambda_x(s)$ and $c_x(t)\le c_x(s)$, then
-$c_{\goal}(C[t])\le c_{\goal}(C[s])$ for every context $C$.
-(Induct up the spine of $C$: at each constructor the child labels
-agree, so the output labels agree by factorization, and the costs
-compare by monotonicity of $G_r$ in the cost coordinate.)
-Consequently, a move that lowers a piece's cost can raise the total
-cost only by \emph{weakening the piece's label}.
-\end{remark}
-
-This locates the source of ruggedness.
-A greedy improver that gets stuck short of the optimum---despite
-having improving pieces available---is stuck on a \emph{label
-tradeoff}: a cheaper-but-weaker piece against a
-costlier-but-stronger one.
-These are exactly the dominance-incomparable entries of the memo
-frontier (Remark~\ref{rem:pareto}); the branching antichains of the
-cost--property frontier are the generators of the terrain's
-non-convexity.
-If every subgoal's solutions carried a single label, piecewise
-improvement would compose monotonically and the ridges would
-vanish.
-In this precise sense, the terrain's ruggedness is the width of
-Section~\ref{sec:width} made visible; the notoriously rugged move
-terrains of the traveling salesperson problem and Held--Karp's
-exponential table (Example~\ref{ex:heldkarp}) are two symptoms of
-one underlying quantity.
-
-One distinction keeps the claim honest.
-A point can be locally minimal for two different reasons: every
-available move loses on a cost--property tradeoff, or the winning
-substitution simply lies outside the move set---as when a 2-opt
-local minimum in the traveling salesperson problem is escaped by a
-3-opt move.
-The first reason is intrinsic to the problem and is what the width
-analysis measures; the second is an artifact of search design, the
-classical concern of neighborhood
-exactness~\cite{papadimitriou1982combinatorial}, and our framework
-does not speak to it.
-
-\begin{remark}[Deferred commitment dissolves the terrain]
-\label{rem:terrain-dissolve}
-A local search occupies one terrain point at a time, so at every
-label tradeoff it makes an irrevocable commitment.
-The lifted recurrence instead carries, per subgoal, the entire
-cost--property frontier: the discrete choice among incomparable
-pieces is deferred until the context that discriminates among them
-has been assembled.
-This is an order-theoretic analogue of convexification:
-convexification enlarges a continuous search space until local
-optima disappear; the frontier lift enlarges the memo state until
-Bellman's principle holds.
-Equivalently one may keep the terrain---its points and moves
-unchanged---and lift the \emph{cost}: replace the scalar objective
-$c$ by a vector objective
-$\hat c:\Sol(\goal)\to\Rbar^{\,d}$, compared by dominance, from
-which $c$ is recovered by a fixed monotone aggregation (here,
-coordinatewise minimum).
-We call this a \emph{cost lift}; its size is $d$, the number of
-cost dimensions.
-Taking one coordinate per maximal label---in the spirit of
-Ioannidis and Kang's analysis of query optimization
-terrains~\cite{ioannidis1991left}---the cost lift and the semantic
-lift become the same construction in different coordinates.
-\end{remark}
-
-The remainder of this subsection is the most speculative material in
-the paper: two remarks that fix a geometric target for the dimension
-theory, an open problem that states exactly what remains to be
-defined and proved, and a summary of the literature bridges we
-believe deserve exploration.
-
-\begin{remark}[Dimension as terrain smoothing]
-\label{rem:terrain-dim}
-The terrain gives the Bellman dimension
-(Definition~\ref{def:dimension}) a reading in the geometry of the
-cost surface itself, independent of any property vocabulary.
-A cost lift of size $d$ (Remark~\ref{rem:terrain-dissolve}) embeds
-the surface in $\Rbar^{\,d}$, compared by dominance; call the lift
-\emph{smoothing} if dominance-descent by substitution never strands:
-from every suboptimal point, some move improves in the dominance
-order.
-The recovery condition is what keeps smoothing meaningful: the
-vector optimum must project back to the scalar optimum, so the
-coordinates cannot simply ignore $c$.
-The question below is the least $d$ for which a smoothing lift
-exists.
-By Remark~\ref{rem:terrain-mono}, label tradeoffs are the only
-ridges, so smoothing requires exactly that every genuine tradeoff
-remain visible as an incomparability of embedded points rather than
-collapse into a scalar ridge.
-Which incomparabilities are genuine is forced by the problem: if two
-equal-cost pieces are each strictly preferred by some context, no
-smoothing embedding may order their images, since domination at
-equal cost would contradict the dominated piece's preferred context.
-Realizing a prescribed incomparability structure by dominance in $d$
-scalar coordinates is precisely the classical \emph{order dimension}
-of Dushnik and Miller~\cite{dushnikmiller1941}.
-We therefore expect the minimal smoothing dimension to be the order
-dimension of the forced-preference structure on continuation
-classes.
-The semantic (Boolean) dimension bounds it from above: bundle labels
-embed the frontier in the Boolean lattice $\mathcal P(O)$, whose
-order dimension is exactly $|O|$.
-Sperner's theorem gives the counting form of the lower bound: a
-$k$-antichain of forced incomparabilities requires
-$\binom{d}{\lfloor d/2\rfloor}\ge k$, (slightly) more than the
-$2^d\ge w$ of Proposition~\ref{prop:bounds}(2), and conceptually
-different: dimension measures the \emph{incomparability structure}
-of the continuation classes, not the number of names.
-Finally, the compositionality gap (Open Problem~\ref{open:gap})
-acquires a geometric face: the coordinates of a smoothing embedding
-must be features that substitution respects---propagating through
-every constructor---so the compositional dimension may exceed the
-order dimension, and by how much is the gap.
-\end{remark}
-
-\begin{remark}[Basin count is not dimension]
-\label{rem:terrain-basins}
-The deferral analogy is exact at the level of a single ridge:
-deferring one dominance-incomparable pair in a memo table removes
-one ridge from the lifted terrain, and deferring all of them
-dissolves the terrain (Remark~\ref{rem:terrain-dissolve}).
-It is tempting to conclude that dimension is a function of the
-number of basins, but in the surface geometry the two quantities are
-classically independent: posets of order dimension two already
-contain arbitrarily large antichains, so two coordinates can smooth
-a terrain with arbitrarily many mutually-ridged basins.
-Moreover the basin count varies with the move set and the particular
-costs, which the order dimension does not.
-The distinction is between counting and structure.
-Basin count asks \emph{how many} tradeoffs the instance realizes.
-Dimension asks how the tradeoffs \emph{interlock}: whether every
-incomparability can be explained by the same two rankings
-disagreeing---in which case two coordinates suffice, however many
-tradeoffs there are---or whether the incomparabilities are
-entangled in patterns that force many mutually independent
-rankings, as in the standard examples of dimension
-theory~\cite{trotter1992}.
-
-What does hold is an instance-computable upper bound: re-encoding
-with one property per realized bundle (singleton labels
-$\lambda'_x(s)=\{(x,\lambda_x(s))\}$, arranged as in
-Proposition~\ref{prop:trivial}) shows that the dimension is at most
-the number of non-empty bundle entries the instance realizes,
-$\sum_x |\lambda_x(\Sol(x))|$; and, conditional on constructors
-descending to continuation classes
-(Conjecture~\ref{conj:universality}), at most $\sum_x w(x)$, via one
-property per class.
-Both bounds are typically loose, and the looseness is the point: a
-good property vocabulary is precisely a compression of many realized
-bundles---and many basins---onto a low-dimensional dominance order,
-and finding such a vocabulary is the compositionality gap once more.
-\end{remark}
-
-\begin{openproblem}[Geometric dimension of a dynamic program]
-\label{open:geometric-dim}
-Make the smoothing picture precise.
-\begin{enumerate}
-\item \emph{Identify the relation.}
-  Order dimension realizes a \emph{given} partial order; our
-  constraints prescribe certain \emph{incomparabilities} (mutually
-  preferred equal-cost classes) while leaving other comparabilities
-  free.
-  The quantity at stake is therefore the minimum dimension over all
-  partial orders consistent with the constraints---in general
-  smaller than the dimension of any one realized frontier order.
-  Define this quantity, and determine whether it coincides with a
-  standard notion.
-\item \emph{Prove the sandwich.}
-  Conjecturally,
-  \[
-  \text{order dimension of the forced structure}
-  \;\le\;
-  \text{compositional (Bellman) dimension}
-  \;\le\;
-  |O|
-  \]
-  for every sufficient vocabulary $O$, with the first inequality
-  strict exactly when substitution-respecting coordinates cost more
-  than unconstrained ones (Open Problem~\ref{open:gap}).
-\item \emph{Settle the complexity.}
-  Deciding order dimension $\le 2$ is polynomial; $\le 3$ is
-  NP-complete~\cite{yannakakis1982}.
-  Determine what this implies for computing or approximating the
-  Bellman dimension of a decomposition system, and identify
-  tractable classes (e.g., bounded width, interval-order frontier
-  structure).
-\end{enumerate}
-\end{openproblem}
-
-Several bodies of literature meet here, and each offers something
-specific.
-Dimension theory for finite posets~\cite{trotter1992} supplies
-lower-bound technology (critical pairs, the standard examples) that
-should transfer to Bellman dimension essentially unchanged; it is
-also where the prescribed-incomparability variant of item (1) above
-should be checked against known notions before we coin one.
-The complexity theory of local search---PLS~\cite{johnson1988easy}
-and neighborhood exactness~\cite{papadimitriou1982combinatorial}---%
-addresses how hard it is to \emph{find} local optima, where our
-width analysis addresses \emph{why} they exist; whether small width
-places a problem in a tractable fragment of PLS is, to our
-knowledge, open.
-Finally, the empirical landscape-analysis tradition in query
-optimization~\cite{ioannidis1991left} measured the shapes of real
-cost surfaces; the width and dimension of Section~\ref{sec:width}
-are candidate structural explanations for those measurements, and
-re-running such experiments with frontier-indexed state would test
-the theory.
-
-\subsection{The Mult-Egraph}
-\label{sec:multegraph}
-
-The framework prescribes a data structure for equality saturation.
-An e-graph groups terms into classes by equivalence; a
-\emph{mult-egraph} further partitions each class by semantic label,
-so that a term's subclass records exactly the properties it
-provides.
-The exact-label partition is the general structure; the memo
-frontier and the requirement-indexed table of
-Section~\ref{sec:foundations} are derived views, obtained by
-pruning and coarsening.
-
-\begin{definition}[Mult-egraph]
-\label{def:multegraph}
-Let a decomposition system be presented as an e-graph
-(Example~\ref{ex:egraph}) with a semantic labeling $\lambda$.
-The \emph{mult-egraph} refines each e-class $x$ into
-\emph{subclasses}
-\[
-x[q] \;=\; \{\,s\in\Sol(x) : \lambda_x(s)=q\,\},
-\]
-one for each realized label $q\in\lambda_x(\Sol(x))$.
-An e-node $r$ whose children are drawn from subclasses
-$x_1[q_1],\ldots,x_k[q_k]$ is placed in subclass
-$x[F_r(q_1,\ldots,q_k)]$.
-\end{definition}
-
-\begin{proposition}[Well-definedness; to be proved]
-\label{prop:multegraph}
-The subclass placement of e-nodes is well defined---every choice of
-terms from the child subclasses yields parent terms with a common
-label---if and only if the labeling factors
-(Definition~\ref{def:factorization}(1)).
-The mult-egraph is thus the data-structure form of the Bellman
-condition: it exists as a coherent refinement of the e-graph exactly
-when semantic memoization is exact.
-\end{proposition}
-
-\begin{remark}[Minimization]
-\label{rem:multegraph-min}
-Two coarsenings of the exact-label structure are useful in practice.
-First, \emph{Pareto pruning}: extraction needs only a cheapest
-representative per subclass, and subclasses dominated in both cost
-and label (Remark~\ref{rem:pareto}) can be dropped; the survivors
-are the memo frontier, and a bundle requirement $q$ is answered by
-the cheapest surviving subclass whose label covers $q$.
-Second, the \emph{requirement quotient}: subclasses that no
-continuation can distinguish may be merged, and the coarsest correct
-merge is the continuation quotient $K_x$
-(Conjecture~\ref{conj:minimality}).
-A mult-egraph finer than $K_x$ wastes space; one coarser extracts
-suboptimally.
-Finally, the nested, coarser views of a mult-egraph arise by
-forgetting properties: the restriction maps of
-Definition~\ref{def:restriction} coarsen the partition, and the
-tower of views along the subgoal order is exactly the monotone
-shrinkage of Section~\ref{sec:interest}.
-\end{remark}
-
-\begin{openproblem}
-\label{open:egraph}
-Construct an explicit equality-saturation example in which e-classes
-are strictly coarser than continuation equivalence---i.e., ordinary
-single-representative extraction is inexact---and exhibit a
-property domain $O$ of extraction-relevant properties
-(streamability, partition-preservation, sortedness, \ldots) whose
-semantic factorization restores exactness via
-Theorem~\ref{thm:exactness}.
-Beyond validating the framework, this is the design brief for a
-follow-on to \textsf{egg} built on the mult-egraph: an extraction
-engine that takes $(O,\preceq,I,F_r,G_r)$ as input and thereby
-subsumes Cascades-style optimizers as one configuration.
-\end{openproblem}
-
-\subsection{Demand Transformation}
-\label{sec:demand}
-
-The requirement bundles of Section~\ref{sec:bundles} are demands,
-and there is a classical theory of demand in bottom-up evaluation:
-magic-sets rewriting~\cite{bancilhon1986magic} and its refinement,
-demand transformation~\cite{tekle2011subsumptive}.
-There, an \emph{adornment} describes what a calling context demands
-of a subgoal, and the rewrite specializes each predicate by
-adornment so that bottom-up evaluation computes only demanded facts.
-The correspondence with the present framework is close: adorned
-predicates are pairs (predicate, demand descriptor) exactly as our
-lifted memo states are pairs $(x,q)$.
-One notable difference: magic sets specializes on \emph{values}
-(which tuples) to prune irrelevant computation, while we specialize
-on \emph{properties} (how outputs are shaped) to restore Bellman's
-principle---the same rewrite, deployed for relevance in one case and
-sufficiency in the other.
-We see three uses for the correspondence.
-
-First, it derives the remaining-interest assignment.
-Definition~\ref{def:interest} takes $I$ as given; the demand
-transformation computes it.
-Define the \emph{demand closure} $D$ as the least set of pairs such
-that $(\goal,\varnothing)\in D$, and whenever $(x,q)\in D$ and
-$r:(x_1,\ldots,x_k)\to x$ admits child bundles with
-$q\sqsubseteq F_r(q_1,\ldots,q_k)$, each $(x_i,q_i)\in D$.
-Restricting the lifted recurrence to $D$ should preserve
-$\widehat V_{\goal}(\varnothing)$, and
-$I(x)=\bigcup\{q : (x,q)\in D\}$ is a candidate constructive answer
-to where $I$ comes from---relevant to the construction demanded by
-Conjecture~\ref{conj:universality}.
-
-Second, it names a duality we have circled repeatedly:
-\emph{Cascades is the magic-sets rewriting of Selinger}.
-Top-down optimizers propagate required physical properties from
-parent to child with memoization; that is demand-transformed
-evaluation of the lifted bottom-up recurrence.
-The bottom-up and top-down architectures are not merely analogous;
-they should be related by a rewrite with a classical correctness
-proof pattern.
-
-Third, it is load-bearing for the mult-egraph
-(Section~\ref{sec:multegraph}): the exact-label partition can be
-large, and the demand closure prescribes which subclasses to
-materialize.
-Goal-directed extraction is demand-transformed extraction.
-Suggestively, the result that \emph{subsumptive} tabling beats magic
-sets~\cite{tekle2011subsumptive} maps onto our satisfaction
-relation: answering a demand $q$ from a stronger cached supply
-$\lambda(s)\sqsupseteq q$ is subsumption, so dominance-aware
-memoization is the optimization their analysis rewards.
-
-\begin{remark}[Demand can overshoot supply]
-\label{rem:demand-supply}
-The demand closure as defined ranges over \emph{all} child bundles
-admitted by the transfer maps, and may therefore demand bundles that
-no solution supplies: in the running example, a top merge join on
-$b$ demands $(RS,\{b\})$, which Example~\ref{ex:crank} showed to be
-unrealizable.
-The practically right object is the intersection of the demand
-closure, computed top-down, with realized supply, computed
-bottom-up---which is exactly what a Cascades-style memo achieves
-operationally and what subsumptive tabling approximates.
-Any minimality claim about the induced $I$ must be stated relative
-to this intersection, not to demand alone.
-\end{remark}
-
-\begin{openproblem}[Demand transformation of the lifted recurrence]
-\label{open:demand}
-Formalize the demand closure, prove that restriction to it preserves
-the goal value, show that the induced $I$ is the least antitone
-remaining-interest assignment supporting the goal demand, and
-determine whether the complexity guarantees of demand transformation
-and subsumptive tabling transfer to property-indexed dynamic
-programs.
-\end{openproblem}
-
-\subsection{Relation to Determination Theory}
-\label{sec:determination-bridge}
-
-We have kept the development self-contained, but the correspondence
-flagged in Remark~\ref{rem:determination} deserves a precise
-statement.
-In determination theory, a specification presents a space of
-admissible outcomes whose ambiguity is resolved by a sequence of
-commitments; each commitment shrinks ambiguity monotonically, and
-static determination rewrites the specification before execution so
-that fewer commitments remain at runtime.
-Here, $I(x)$ behaves as the remaining ambiguity over observations, the
-antitone shrinkage of Definition~\ref{def:interest} behaves as a
-filtration, and the lift from single solutions to frontier-indexed
-memo states is a static determination: it replaces a premature
-commitment (``keep one best plan'') with an explicit representation
-of deferred alternatives.
-We conjecture, informally, that semantic dynamic programming is the
-special case of static determination in which the specification is
-an optimization problem over a decomposition system, and that the
-Persistence and monotonicity properties of determination filtrations
-specialize to Lemma~\ref{lem:restriction}.
-Making this precise---in particular, relating the continuation
-quotient $K_x$ to support quotients---is future work.
-
-\TODO{Nested antichains (``ears on ears''). We may have discovered
-something that needs to be fixed in the determination papers.
-In a join-semilattice, nested joins flatten:
-$a\sqcup(b\sqcup c)=a\sqcup b\sqcup c$, so nested antichains such as
-$\{\{c,d\},b\}$ denote nothing beyond their flattening
-$\{b,c,d\}$ within $Q_x$.
-Earlier discussion suggested that nesting records the
-\emph{dependency structure among future commitments} (staged or
-conditional choices), which---if it must be retained---belongs in
-the constructor algebra or in a richer subgoal index rather than in
-the bundle domain.
-Decide: is the flat completion always enough (with staging carried
-by $X$ and the $F_r$), or do we need an explicit AND/OR term algebra
-over joins and constructors?
-Note: the subclass structure of the mult-egraph
-(Definition~\ref{def:multegraph}) is a candidate home for exactly
-this staged structure---nesting in the data structure rather than in
-the bundle domain.
-Discuss separately and resolve before the universality proof
-attempt.}
+Keeping these steps separate is important.  Goals and e-nodes describe
+the local vocabulary of the schema.  Equivalence and composition are
+additional structures imposed on that vocabulary.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\bibliographystyle{ACM-Reference-Format}
-\begin{thebibliography}{9}
+\section{Composition}
+\label{sec:composition}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\bibitem{selinger1979access}
-P.~Griffiths Selinger, M.~M. Astrahan, D.~D. Chamberlin, R.~A. Lorie,
-and T.~G. Price.
-\newblock Access path selection in a relational database management
-system.
-\newblock In \emph{SIGMOD}, 1979.
+Goals and e-nodes describe the local alternatives available to a
+schema.  We next describe how alternatives for one goal may be composed
+from alternatives for other goals.
 
-\bibitem{willsey2021egg}
-M.~Willsey, C.~Nandi, Y.~R. Wang, O.~Flatt, Z.~Tatlock, and
-P.~Panchekha.
-\newblock egg: Fast and extensible equality saturation.
-\newblock \emph{Proc. ACM Program. Lang.}, 5(POPL), 2021.
+We begin with a concrete, unquotiented account of composition.  This
+will later provide the semantic relation represented more compactly by
+references to multe-classes.
 
-\bibitem{graefe1995cascades}
-G.~Graefe.
-\newblock The Cascades framework for query optimization.
-\newblock \emph{IEEE Data Eng. Bull.}, 18(3), 1995.
+Let \(X\) be the set of goals, and let \(\mathsf{N}(x)\) be the set of
+e-nodes for each goal \(x \in X\).
 
-\bibitem{ioannidis1991left}
-Y.~E. Ioannidis and Y.~C. Kang.
-\newblock Left-deep vs. bushy trees: An analysis of strategy spaces
-and its implications for query optimization.
-\newblock In \emph{SIGMOD}, 1991.
+\begin{definition}[Composition signature]
+A \emph{composition signature} is a tuple
+\[
+d=(x \Rightarrow x_1,\ldots,x_k)
+\]
+consisting of a parent goal \(x\) and an ordered list of subgoals
+\(x_1,\ldots,x_k\).
+\end{definition}
 
-\bibitem{trotter1992}
-W.~T. Trotter.
-\newblock \emph{Combinatorics and Partially Ordered Sets: Dimension
-Theory}.
-\newblock Johns Hopkins University Press, 1992.
+A composition signature specifies only the types of the participating
+alternatives.  It does not yet say which combinations are semantically
+admissible.
 
-\bibitem{yannakakis1982}
-M.~Yannakakis.
-\newblock The complexity of the partial order dimension problem.
-\newblock \emph{SIAM J. Algebraic Discrete Methods}, 3(3), 1982.
+\begin{definition}[Composition relation]
+For a composition signature
+\[
+d=(x \Rightarrow x_1,\ldots,x_k),
+\]
+a \emph{composition relation} is a relation
+\[
+\mathcal{R}_d
+\subseteq
+\mathsf{N}(x)
+\times
+\mathsf{N}(x_1)
+\times\cdots\times
+\mathsf{N}(x_k).
+\]
 
-\bibitem{johnson1988easy}
-D.~S. Johnson, C.~H. Papadimitriou, and M.~Yannakakis.
-\newblock How easy is local search?
-\newblock \emph{J. Comput. Syst. Sci.}, 37(1), 1988.
+A tuple
+\[
+(n,n_1,\ldots,n_k)\in\mathcal{R}_d
+\]
+states that the parent alternative \(n\) may be realized using the
+subgoal alternatives \(n_1,\ldots,n_k\).
+\end{definition}
 
-\bibitem{dushnikmiller1941}
-B.~Dushnik and E.~W. Miller.
-\newblock Partially ordered sets.
-\newblock \emph{American Journal of Mathematics}, 63(3), 1941.
+Composition is relational rather than functional.
 
-\bibitem{papadimitriou1982combinatorial}
-C.~H. Papadimitriou and K.~Steiglitz.
-\newblock \emph{Combinatorial Optimization: Algorithms and
-Complexity}.
-\newblock Prentice-Hall, 1982.
+For a given parent goal \(x\), there may be many admissible
+configurations of subgoals.  These may differ in both the parent
+alternative and the alternatives chosen for its subgoals:
+\[
+(n,n_1,\ldots,n_k)\in\mathcal{R}_d,
+\qquad
+(n',n'_1,\ldots,n'_k)\in\mathcal{R}_{d'}.
+\]
 
-\bibitem{bancilhon1986magic}
-F.~Bancilhon, D.~Maier, Y.~Sagiv, and J.~D. Ullman.
-\newblock Magic sets and other strange ways to implement logic
-programs.
-\newblock In \emph{PODS}, 1986.
+For example, the goal \(R\Join S\) may be realized by a hash join over
+arbitrary implementations of \(R\) and \(S\), or by a merge join over
+implementations that provide suitable orders.
 
-\bibitem{tekle2011subsumptive}
-K.~T. Tekle and Y.~A. Liu.
-\newblock More efficient datalog queries: Subsumptive tabling beats
-magic sets.
-\newblock In \emph{SIGMOD}, 2011.
+Conversely, one parent alternative may admit several child
+realizations:
+\[
+(n,n_1,\ldots,n_k) \in \mathcal{R}_d,
+\qquad
+(n,n'_1,\ldots,n'_k) \in \mathcal{R}_d.
+\]
+The parent e-node records a local semantic alternative, not necessarily
+a unique derivation from concrete children.
 
-\bibitem{heldkarp1962}
-M.~Held and R.~M. Karp.
-\newblock A dynamic programming approach to sequencing problems.
-\newblock \emph{J. SIAM}, 10(1), 1962.
+This relational treatment separates three matters that are often
+conflated:
 
-\bibitem{sutton2018reinforcement}
-R.~S. Sutton and A.~G. Barto.
-\newblock \emph{Reinforcement Learning: An Introduction}.
-\newblock MIT Press, second edition, 2018.
+\begin{enumerate}
 
-\bibitem{hellerstein2026determination}
-J.~M. Hellerstein.
-\newblock A computational theory of ambiguity and its determination.
-\newblock Working draft, 2026.
+\item
+\emph{semantic admissibility}: whether a tuple belongs to
+\(\mathcal{R}_d\);
 
-\end{thebibliography}
+\item
+\emph{evaluation direction}: whether an implementation explores the
+relation from parent to children, from children to parent, or in both
+directions; and
+
+\item
+\emph{preference}: whether one admissible tuple is cheaper or otherwise
+preferred to another.
+
+\end{enumerate}
+
+Only the first belongs to the semantic schema.  A composition relation
+has no intrinsic traversal direction and contains no cost information.
+
+\begin{example}[Join composition]
+Let
+\[
+x_R,\qquad x_S,\qquad x_{R \Join S}
+\]
+be goals, and consider the composition form
+\[
+d_{\mathsf{join}}
+=
+( x_{R \Join S} \Rightarrow x_R,x_S ).
+\]
+
+The relation
+\[
+\mathcal{R}_{d_{\mathsf{join}}}
+\subseteq
+\mathsf{N}(x_{R \Join S})
+\times
+\mathsf{N}(x_R)
+\times
+\mathsf{N}(x_S)
+\]
+may contain tuples such as
+\[
+(\mathsf{HashJoin},r,s),
+\]
+\[
+(\mathsf{MergeJoin},r',s'),
+\]
+and
+\[
+(\mathsf{NestedLoopJoin},r'',s'').
+\]
+
+Membership states only that the corresponding child alternatives may
+be combined to realize the parent alternative.  It does not rank the
+join methods or prescribe an order in which they are considered.
+\end{example}
+
+\begin{example}[Expression composition]
+For a binary addition form
+\[
+d_{+}
+=
+(x \Rightarrow x_1,x_2),
+\]
+the relation
+\[
+\mathcal{R}_{d_{+}}
+\subseteq
+\mathsf{N}(x)
+\times
+\mathsf{N}(x_1)
+\times
+\mathsf{N}(x_2)
+\]
+records which child alternatives may be combined by addition to realize
+an alternative for \(x\).
+
+Equivalent parent expressions may arise from different child tuples,
+and the same child tuple may participate in several equivalent parent
+representations.
+\end{example}
+
+\begin{definition}[Concrete semantic schema]
+A \emph{concrete semantic schema} consists of
+
+\begin{enumerate}
+
+\item
+a finite set of goals \(X\);
+
+\item
+a finite set of e-nodes \(\mathsf{N}(x)\) for each \(x \in X\);
+
+\item
+a finite collection of composition forms \(d\); and
+
+\item
+a composition relation \(\mathcal{R}_d\) for each form \(d\).
+
+\end{enumerate}
+\end{definition}
+
+The concrete schema may be much larger than an optimizer should
+materialize.  It distinguishes individual child e-nodes even when a
+parent can observe only some coarser semantic property of them.
+
+The next chapter introduces multe-classes.  Once those classes are
+available, a non-atomic parent e-node will refer to child
+multe-classes rather than to individual child e-nodes.  The resulting
+multe-graph is a quotient representation of the concrete composition
+relations defined here.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Semantic Quotients}
+\label{chap:quotients}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Multe-Classes}
+\label{sec:multe-classes}
+
+This section will define a multe-class as a semantic equivalence
+class of e-nodes belonging to one goal.
+
+\section{Refinement Hierarchies}
+\label{sec:refinement-hierarchies}
+
+We will begin with tree-shaped hierarchies and later replace them
+with compatible quotient families ordered by refinement.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Multe-Graphs}
+\label{chap:multe-graphs}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Definition}
+\label{sec:multe-graph-definition}
+
+A multe-graph combines an e-graph-style compositional graph with
+a hierarchy of multe-classes for each goal.
+Composite e-nodes reference child multe-classes.
+
+\section{Semantic Soundness}
+\label{sec:multe-graph-soundness}
+
+This section will state the local compatibility conditions
+required for quotienting and composition to agree.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Problem Instances}
+\label{chap:instances}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Requirements}
+\label{sec:requirements}
+
+We will first treat Boolean requirements attached at the root,
+then allow requirements to attach to arbitrary classes,
+operators, or composition positions.
+
+\section{Propagation}
+\label{sec:propagation}
+
+This section will define the propagated instance as a least
+fixed point of local dependency rules.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Canonicalization}
+\label{chap:canonicalization}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Canonicalization Policies}
+\label{sec:canonicalization-policies}
+
+Canonicalization will be defined independently of requirements
+and semantic quotienting.
+
+\section{Scalar Optimization}
+\label{sec:scalar-optimization}
+
+Scalar cost will provide the simplest entailed
+canonicalization.
+
+\section{Pareto Lifting}
+\label{sec:pareto-lifting}
+
+Pareto optimization will be expressed by lifting the outcome
+domain to antichains of undominated alternatives.
+
+\section{Determination}
+\label{sec:determination}
+
+Determination will address the residual case in which semantic
+entailment leaves several incomparable outcomes.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Extraction}
+\label{chap:extraction}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Definition}
+\label{sec:extraction-definition}
+
+Extraction will be defined as requirement propagation followed by
+canonicalization.
+
+\section{Bellman Compatibility}
+\label{sec:bellman-compatibility}
+
+This section will state the conditions under which one
+canonical representative per surviving multe-class suffices.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Examples}
+\label{chap:examples}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Selinger-Style Query Optimization}
+\label{sec:selinger-example}
+
+The first example will recover interesting orders as surviving
+multe-class distinctions induced by a query instance.
+
+\section{Equality Saturation}
+\label{sec:egraphs-example}
+
+The second example will relate ordinary e-classes, nested
+multe-classes, and extraction.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Theorem Roadmap}
+\label{chap:theory}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Propagation}
+\label{sec:propagation-theory}
+
+We will seek existence, uniqueness, and traversal independence
+of the propagated fixed point.
+
+\section{Minimality}
+\label{sec:minimality-theory}
+
+We will ask whether the instantiated multe-graph is the unique
+coarsest quotient preserving every required observation.
+
+\section{Extraction Soundness}
+\label{sec:extraction-soundness}
+
+We will compare extraction over the instantiated graph with
+extraction over the fully expanded semantic relation.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Generalizations}
+\label{chap:generalizations}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+We will relax tree-shaped quotient hierarchies, root-only
+requirements, acyclicity, Boolean requirement domains, and
+uniform canonicalization policies.
 
 \end{document}
