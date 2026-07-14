@@ -1,14 +1,29 @@
-\documentclass[11pt]{book}
+\documentclass[sigconf,nonacm]{acmart}
 
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
+\settopmatter{printfolios=true}
+
+% ---------- Packages ----------
 \usepackage{microtype}
-\usepackage{amsmath,amssymb,amsthm}
 \usepackage{enumitem}
-\usepackage[hidelinks]{hyperref}
 
+% ---------- Dense formatting ----------
+\setlist{nosep,leftmargin=*}
+% Tighten space around theorem environments
+\makeatletter
+\def\thm@space@setup{%
+  \thm@preskip=4pt plus 1pt minus 1pt
+  \thm@postskip=4pt plus 1pt minus 1pt
+}
+\makeatother
+\hypersetup{hidelinks}
+
+% ---------- Diagram support ----------
+\usepackage{tikz}
+\usetikzlibrary{positioning,calc,arrows.meta,fit}
+
+% ---------- Theorem environments ----------
 \theoremstyle{definition}
-\newtheorem{definition}{Definition}[chapter]
+\newtheorem{definition}{Definition}[section]
 \newtheorem{example}[definition]{Example}
 \newtheorem{question}[definition]{Question}
 
@@ -18,211 +33,276 @@
 \newtheorem{proposition}[definition]{Proposition}
 \newtheorem{corollary}[definition]{Corollary}
 \newtheorem{conjecture}[definition]{Conjecture}
+\newtheorem{openproblem}[definition]{Open Problem}
 
 \theoremstyle{remark}
 \newtheorem{remark}[definition]{Remark}
 
-\title{Semantic Schemas and Canonicalization}
+% ---------- Internal-draft helpers ----------
+\newcommand{\TODO}[1]{\medskip\noindent\fbox{\parbox{\dimexpr\linewidth-2\fboxsep}{\textbf{TODO:}\ #1}}\medskip}
+
+\title{Semantic Schemas and Bellman's Principle}
+
 \author{Joseph M. Hellerstein}
-\date{}
+\affiliation{%
+  \institution{UC Berkeley \& Amazon Web Services}
+  \city{Berkeley, CA}
+  \country{USA}
+}
+
+\author{Sarah Morin}
+\affiliation{%
+  \institution{UC Berkeley}
+  \city{Berkeley, CA}
+  \country{USA}
+}
+
+\author{Max Willsey}
+\affiliation{%
+  \institution{UC Berkeley}
+  \city{Berkeley, CA}
+  \country{USA}
+}
 
 \begin{document}
 
 \maketitle
-\tableofcontents
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Introduction}
+\section{Introduction}
+\label{sec:introduction}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Which Distinctions Must an Optimizer Preserve?}
-\label{sec:intro-preserve}
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Many optimization algorithms exploit compositional structure.
 
-A broad family of discrete optimization problems can be characterized
-as encompassing a hierarchy of subproblems to optimize.
-A subproblem may admit many solutions.
-Retaining all of them is correct but often impractical.
-Retaining only one locally preferred solution is efficient but
-generally unsound.
-An optimizer for these settings needs a principled way to decide which
-distinctions among solutions must be preserved.
+A query optimizer decomposes a query into subqueries.
+A dynamic program decomposes a problem into subproblems.
+An equality-saturation engine decomposes an expression into equivalent
+subexpressions.
 
-Relational database query optimization provides a familiar example.
-For a fixed relational subquery, many physical plans compute the
-same logical result.
-Some differ only in properties such as output order.
-A subplan that is more expensive in isolation may nevertheless be
-the best input to a larger optimal plan because an enclosing operator
-can exploit that order.
-Selinger's treatment of interesting orders preserves exactly
-such distinctions: plans for the same subquery are kept
-separate only when a larger expression may distinguish them.
+Although these systems appear quite different, they all confront the
+same question:
 
-The same issue appears in equality saturation.
-An e-class records alternatives that are equivalent at one
-semantic level, while analyses or nested equivalences may retain
-finer distinctions needed by surrounding expressions.
-Again, the difficulty is not merely to enumerate alternatives,
-but to determine the coarsest equivalence under which future
-composition remains correct.
+\begin{quote}
+\emph{What information about a solved subproblem must be retained so
+that larger problems can still be solved correctly?}
+\end{quote}
 
-These notes study that problem directly.
+Retaining every distinction among subproblem realizations is always
+correct but quickly becomes infeasible.
+Discarding distinctions too aggressively may destroy globally optimal
+solutions.
 
-We begin from a static semantic object rather than from a search
-algorithm.
-The object has two orthogonal components.
+The success of a compositional optimizer therefore depends on choosing
+the right semantic interface between parent and child subproblems.
 
-\begin{enumerate}[label=(\arabic*)]
+Relational query optimization provides the classical example.
+For a fixed relational expression, many physical plans compute the same
+result.
+Some nevertheless differ in properties, such as output order, that may
+be exploited by enclosing operators.
+Selinger's notion of \emph{interesting orders} preserves exactly those
+distinctions that remain observable during future composition.
 
-\item
-A hierarchy of semantic equivalences groups alternatives at
-multiple resolutions.
-We call its classes \emph{multe-classes}.
+Equality saturation faces the same issue from the opposite direction.
+An e-class intentionally forgets distinctions among equivalent
+expressions.
+Extraction then assumes that one representative of each e-class
+suffices.
+When contextual semantic distinctions matter, however, a single
+equivalence class may be too coarse.
 
-\item
-A compositional graph records how a non-atomic alternative
-depends on multe-classes of subgoals.
-As in an ordinary e-graph, a parent e-node references child
-e-classes rather than child e-nodes.
+These observations suggest that the central object of compositional
+optimization is neither a search algorithm nor an objective function.
+It is the semantic interface through which subproblems compose.
 
-\end{enumerate}
+This paper develops a mathematical framework for those interfaces.
 
-Their combination is a \emph{multe-graph}.
-The multe component records which alternatives are equivalent at
-each semantic resolution.
-The graph component records where those distinctions may be
-observed by composition.
-Neither component, by itself, specifies an optimization
-objective.
+The framework begins with a concrete semantic schema describing all
+realizations of a compositional problem.
+Semantic quotients identify realizations that are interchangeable at
+different resolutions.
+These quotients are organized into hierarchies of
+\emph{multe-classes}.
+Non-atomic realizations reference child multe-classes rather than
+individual child realizations, producing a \emph{multe-graph}.
 
-A multe-graph is therefore a schema for a family of related
-problems.
-A particular problem instance is obtained by imposing
-requirements on that schema.
-For example, the queries
-
-\[
-\texttt{SELECT * FROM R JOIN S}
-\]
-
-and
-
-\[
-\texttt{SELECT * FROM R JOIN S ORDER BY R.a}
-\]
-
-may share one underlying multe-graph.
-The second query adds a requirement at the root.
-Other requirements may be attached elsewhere.
-A memory-constrained instance might, for example, forbid
-implementations that sort their inputs.
-
-Requirements restrict the admissible relation represented by
-the schema.
-Because parent e-nodes refer to child multe-classes, local
-requirements propagate through the graph.
-After propagation, some e-nodes have been removed and some
-semantic boundaries have become unobservable under the requirements.
-Those boundaries may be collapsed.
-The remaining non-empty multe-classes form the semantic state that must be
-retained for the instance.
-
-Only after this instantiation step do we choose
-representatives for the remaining e-classes.
-We call that second operation \emph{canonicalization}.
-The separation is important:
-
-\begin{description}[style=nextline]
-
-\item[Requirements]
-remove alternatives from the \emph{admissible} relation mapping an e-class
-to its e-nodes.
-
-\item[Canonicalization]
-reduces each remaining relation to the unique representation 
-desired for the application.
-
-\end{description}
-
-Scalar optimization is one canonicalization discipline.
-A cost order may entail a unique optimum in each surviving
+A problem instance is obtained by imposing requirements on this
+semantic structure.
+Instantiation propagates those requirements through the multe-graph,
+removing alternatives and semantic distinctions that become
+unobservable.
+Canonicalization then chooses one representative for each surviving
 multe-class.
-Pareto optimization is another.
-It lifts the outcome domain from individual alternatives to
-sets of undominated alternatives; the Pareto frontier is then a
-uniquely entailed outcome in the lifted domain. These are the
-standard settings for optimization. 
-Determination Theory applies when several admissible outcomes remain
-and no semantic order entails a unique one; choosing among them
-requires a \emph{commitment}; we leave this topic aside in the remainder.
 
-The present document develops this decomposition in a
-simplest-first order.
-We begin with finite, acyclic schemas, tree-shaped
-multe-class hierarchies, and Boolean requirements.
-After the basic objects and candidate theorems are clear, we
-relax these assumptions.
+This separation isolates semantic representation from optimization.
 
-The main questions are then precise.
+Optimization supplies only a preference among representatives.
+Scalar optimization, Pareto optimization, and other optimization
+criteria therefore become canonicalization policies over the same
+underlying semantic interfaces.
 
-\begin{enumerate}[label=(\arabic*)]
+Within this framework, Bellman's Principle admits a simple semantic
+interpretation.
 
-\item
-What local conditions make a multe-graph a sound semantic
-schema?
+A parent interacts with each child only through the semantic interface
+represented by the referenced multe-class.
+If that interface is sufficient for future composition, and the
+optimization objective is monotone with respect to it, then one optimal
+representative per multe-class suffices for global optimization.
 
-\item
-When does requirement propagation have a unique least fixed
-point?
+Bellman's Principle is therefore not an independent assumption.
+It is a theorem about semantic interfaces.
 
-\item
-Is the propagated structure the coarsest quotient that
-preserves every distinction observable under the requirements?
+This perspective also separates optimization from search.
 
-\item
-Under what conditions is one canonical representative per
-surviving multe-class sufficient?
+Branch-and-bound, for example, computes monotone entailments about
+unknown optimum values while leaving the semantic representation
+unchanged.
+Likewise, changing the optimization objective leaves the semantic
+interfaces unchanged.
+The framework therefore cleanly separates semantic representation,
+problem instantiation, optimization, canonicalization, and search.
 
-\end{enumerate}
+This separation is not merely aesthetic; its dividends organize the
+paper.
 
-A positive answer to the last question recovers Bellman's
-Principle of Optimality as a consequence of the semantic
-structure rather than as an assumption about a particular search
-procedure.
+First, correctness becomes modular.  Each layer carries its own
+obligation---representation must preserve observable behavior,
+instantiation must preserve satisfying realizations, optimization
+must compose across interfaces, search must preserve the
+optimum---and each can be discharged, or generalized, without
+disturbing the others.  Additive cost relaxes to Pareto frontiers
+without touching the semantic representation; acyclic schemas relax
+to fixed points without touching the objective.
+
+Second, systems that grew up in different communities become
+configurations of one theory.  Selinger's optimizer, Cascades,
+e-graph extraction, and Knuth--Bendix completion differ in which
+layers they fix and which they vary; stated over shared interfaces,
+results transfer among them.
+
+Third, and most consequentially, the separation converts design art
+into mathematics.  Only after the semantic interface is isolated
+from the objective and the search strategy can one ask where
+interfaces come from and what they cost.  The payoffs of
+Section~\ref{sec:payoffs} answer both: interfaces can be derived
+rather than designed, and their unavoidable size is an intrinsic
+complexity measure of the problem, not an artifact of any
+algorithm.
+
+The remainder of the paper develops this framework in a
+simplest-first manner.
+We begin with finite acyclic semantic schemas, tree-shaped refinement
+hierarchies, Boolean local requirements, and additive cost.
+The later sections show that these assumptions may each be relaxed
+independently.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Roadmap}
+\subsection{Roadmap}
 \label{sec:intro-roadmap}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-Chapter~\ref{chap:schemas} introduces semantic schemas: goals,
-e-nodes, and the compositional graph.
-Chapter~\ref{chap:quotients} introduces multe-classes and their
-refinement hierarchies.
-Chapter~\ref{chap:multe-graphs} combines the two structures into
-multe-graphs.
-Chapter~\ref{chap:instances} defines requirements and problem
+Section~\ref{sec:defining-multegraph} defines the multe-graph
+carefully and from scratch: semantic schemas
+(Section~\ref{chap:schemas}), semantic quotients and their
+refinement hierarchies (Section~\ref{chap:quotients}), and the
+combination of the two (Section~\ref{sec:multe-graphs}).  A reading
+guide at its head summarizes the departures from an ordinary e-graph
+and makes the section skimmable for readers who already know
+e-graphs.
+Section~\ref{sec:instances} defines requirements and problem
 instances.
-Chapter~\ref{chap:canonicalization} separates canonicalization
+Section~\ref{sec:canonicalization} separates canonicalization
 from instantiation.
-Chapter~\ref{chap:extraction} defines extraction as requirement
+Section~\ref{sec:extraction} defines extraction as requirement
 propagation followed by canonicalization.
-The later chapters develop examples, theorem statements, and
+The middle sections develop examples, theorem statements, and
 generalizations.
+Section~\ref{sec:payoffs} collects the intended headline results of
+the outbound article: the derivation of semantic interfaces from
+continuation behavior, the width and dimension of a compositional
+optimization problem, and applications to search and to
+rewriting-system completion.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Semantic Schemas}
+\section{The Multe-Graph, Carefully}
+\label{sec:defining-multegraph}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This section defines the multe-graph slowly and from scratch,
+because the outbound article must serve readers who know neither
+e-graphs nor query optimizers.  Readers of this internal draft know
+both, so the section is built to be skimmed: everything downstream
+depends only on its definitions and notation, never on the
+surrounding scaffolding and examples.
+
+\paragraph{Reading guide.}
+For a reader who already knows e-graphs, the genuine departures are
+four.
+
+\begin{enumerate}
+
+\item
+Composition is presented as a relation \(\mathcal R_d\) over
+e-nodes, deliberately stripped of evaluation direction and
+preference (Section~\ref{sec:composition}).
+
+\item
+A goal carries not one equivalence but a \emph{refinement hierarchy}
+of semantic equivalences; multe-classes are the blocks of these
+quotients, and a \emph{cut} assembles a partition from classes at
+different resolutions in different branches
+(Section~\ref{sec:refinement-hierarchies}).
+
+\item
+A non-atomic e-node references one multe-class per child slot, and
+the composition relation is required to agree with those references
+exactly: the e-node appears in the relation once for every
+combination of members drawn from its referenced classes, and for no
+other child tuples.  (An e-node whose admissible children lack this
+shape is split into several e-nodes that have it.)  The consequence
+is that slot-wise substitution always works: any member of a
+referenced class may replace any other, without consulting the
+remaining slots.  It also makes composition functional over the
+quotient: \(\chi\) assigns each e-node its tuple of referenced
+classes (Section~\ref{sec:multe-graph-definition}).
+
+\item
+The notation to retain: a schema
+\(\mathcal S=(X,\mathsf N,\Sigma,\mathcal R)\), a multe-graph
+\(\mathcal G=(\mathcal S,\mathcal C,\chi)\), the typing judgment
+\(n:x\), and multe-classes \([n]_{\equiv}\).
+
+\end{enumerate}
+
+An ordinary e-graph is the special case in which every refinement
+hierarchy is trivial: one universal class per goal.  If the four
+points above read as expected, the rest of this section can be
+treated as reference material.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Semantic Schemas}
 \label{chap:schemas}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-This chapter begins with the unconstrained local vocabulary of a
-semantic schema: goals and their e-nodes.  Semantic equivalence and
-compositional references will be added in the following chapters.
-No requirements, costs, or canonicalization are assumed.
+A \emph{semantic schema} is the object at the base of the framework:
+a description of all admissible realizations of a compositional
+problem, prior to any particular problem instance, cost model, or
+search strategy.  The name is chosen by analogy with database
+schemas.  A schema describes a family of related problems; an
+individual problem instance is obtained later, by registering
+requirements against the schema (Section~\ref{sec:instances}).
+
+The formal definition (Definition~\ref{def:concrete-schema}) arrives
+at the end of this subsection, once its ingredients are in place.
+We build up to it in stages, beginning with the unconstrained local
+vocabulary of a schema: goals and their e-nodes.  Semantic
+equivalence and compositional references will be added in the
+subsections that follow.  No requirements, costs, or
+canonicalization are assumed.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Goals and E-Nodes}
+\subsubsection{Goals and E-Nodes}
 \label{sec:goals-enodes}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -239,7 +319,17 @@ A \emph{goal} is a semantic task whose admissible realizations are to
 be represented by the schema.
 \end{definition}
 
-The word ``goal'' is intentionally neutral.  Depending on the
+The definition is deliberately thin, so it helps to say plainly what
+work the word does.  A goal poses a problem or subproblem---\emph{what}
+to be realized---without
+solving it; the e-nodes defined below are the candidate solutions---\emph{how}
+to achieve the goal---that are on offer for it.  In dynamic-programming terms, a goal is a key of the
+memo table and its e-nodes are the entries stored under that key; in
+typed terms, a goal is a type and its e-nodes are the inhabitants.
+In every register, the goal names the question and the e-nodes are
+its answers.
+
+Depending on the
 application, a goal may be
 
 \begin{itemize}
@@ -250,30 +340,27 @@ application, a goal may be
 \item an abstract capability to be provided.
 \end{itemize}
 
-A goal specifies \emph{what} is to be realized, not how it is realized.
-
 Let \(X\) be a finite set of goals.  For each \(x \in X\), let
-\[
-\mathsf{N}(x)
-\]
-denote the finite set of e-nodes associated with \(x\).
+\(\mathsf{N}(x)\) denote the finite set of e-nodes associated with
+\(x\).
 
 \begin{definition}[E-node]
 An \emph{e-node} for a goal \(x\) is one admissible local realization
 of \(x\).
 \end{definition}
 
-Thus every e-node belongs to exactly one goal.  We write
-\[
-n : x
-\]
+Thus every e-node belongs to exactly one goal.  We write \(n : x\)
 to mean that \(n \in \mathsf{N}(x)\).
+
+The notation anticipates a reading we develop at the end of the
+document (Section~\ref{sec:types}): goals are base types, e-nodes
+are their constructors, and \(n:x\) is a typing judgment.
 
 An e-node is a local realization of its goal.  A non-atomic e-node
 specifies its operator and the semantic requirements on its children,
 without selecting particular child realizations.
 
-For now, we distinguish only two cases.
+We distinguish two cases.
 
 \begin{definition}[Atomic and non-atomic e-nodes]
 An e-node is \emph{atomic} if its realization requires no subordinate
@@ -284,47 +371,37 @@ This distinction records whether an alternative is compositionally
 closed, but does not yet specify its children.
 
 \begin{example}[Relational query optimization]
-Consider the goal
-\[
-x_{R \Join S}
-\]
-of producing the relation \(R \Join S\).
+Consider the goal \(x_{R \Join S}\) of producing the relation
+\(R \Join S\).  Possible e-nodes for this goal include
+\(\mathsf{HashJoin}\), \(\mathsf{MergeJoin}\), and
+\(\mathsf{NestedLoopJoin}\).
 
-Possible e-nodes for this goal include
-\[
-\mathsf{HashJoin(x_R, x_S)},
-\qquad
-\mathsf{MergeJoin(x_R, x_S)},
-\qquad
-\mathsf{NestedLoopJoin(x_R, x_S)}.
-\]
-
-These are different local realizations of the same goal.  They are
-non-atomic because each depends on realizations of the input goals
-\(x_R\) and \(x_S\).
+These are different local realizations of the same goal.  Each is
+non-atomic: realizing the join requires subordinate realizations of
+the goals \(x_R\) and \(x_S\).  The precise relationship between the
+join e-node and those subordinate goals will be introduced in
+Section~\ref{sec:composition}.
 
 A table scan for \(R\), by contrast, may be represented by an atomic
 e-node for the goal \(x_R\).
 \end{example}
 
-\begin{example}[Equality saturation]
-For the goal represented by the expression \(a(b+c)\), possible
-e-nodes may include
-\[
-\mathsf{Mul}(a,b+c)
-\qquad\text{and}\qquad
-\mathsf{Add}(ab,ac).
-\]
+\begin{example}[Expression optimization]
+Let \(x_e\) be the goal of realizing an expression semantically
+equivalent to \(a(b+c)\).  Possible non-atomic e-nodes for this goal
+include \(\mathsf{Mul}\) and \(\mathsf{Add}\).  The first represents
+a multiplicative decomposition of the expression; the second
+represents the distributed additive decomposition \(ab+ac\).
 
-Both realize the same goal.  Their subordinate structure will later be
-represented through references to semantic classes of child goals.
+At this stage we record only that these are distinct local alternatives
+for the same goal.  Their subordinate expressions, and the semantic
+classes to which those subordinate expressions belong, will be
+introduced with composition and multe-graphs.
 \end{example}
 
 At this point, the schema contains only the disjoint family
-\[
-\{\mathsf{N}(x)\}_{x\in X}
-\]
-of alternatives associated with each goal.
+\(\{\mathsf{N}(x)\}_{x\in X}\) of alternatives associated with each
+goal.
 
 Nothing yet identifies two e-nodes as equivalent, and nothing yet says
 how a non-atomic e-node depends on subordinate alternatives.  Those two
@@ -342,7 +419,7 @@ the local vocabulary of the schema.  Equivalence and composition are
 additional structures imposed on that vocabulary.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Composition}
+\subsubsection{Composition}
 \label{sec:composition}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -371,10 +448,7 @@ alternatives.  It does not yet say which combinations are semantically
 admissible.
 
 \begin{definition}[Composition relation]
-For a composition signature
-\[
-d=(x \Rightarrow x_1,\ldots,x_k),
-\]
+For a composition signature \(d=(x \Rightarrow x_1,\ldots,x_k)\),
 a \emph{composition relation} is a relation
 \[
 \mathcal{R}_d
@@ -386,17 +460,13 @@ a \emph{composition relation} is a relation
 \mathsf{N}(x_k).
 \]
 
-A tuple
-\[
-(n,n_1,\ldots,n_k)\in\mathcal{R}_d
-\]
-states that the parent alternative \(n\) may be realized using the
-subgoal alternatives \(n_1,\ldots,n_k\).
+A tuple \((n,n_1,\ldots,n_k)\in\mathcal{R}_d\) states that the
+parent alternative \(n\) may be realized using the subgoal
+alternatives \(n_1,\ldots,n_k\).
 \end{definition}
 
-Composition is relational rather than functional.
-
-For a given parent goal \(x\), there may be many admissible
+Composition is relational rather than functional. That is,
+for a given parent goal \(x\), there may be many admissible
 configurations of subgoals.  These may differ in both the parent
 alternative and the alternatives chosen for its subgoals:
 \[
@@ -419,8 +489,15 @@ realizations:
 The parent e-node records a local semantic alternative, not necessarily
 a unique derivation from concrete children.
 
-This relational treatment separates three matters that are often
-conflated:
+In most presentations these ingredients arrive fused.  A
+dynamic-programming recurrence defines the admissible compositions,
+the order in which they are evaluated, and the minimization over
+them, all in a single equation.  An oriented rewrite rule asserts an
+equation, a direction of travel, and a preference for one side, all
+in one arrow.  An optimizer's transformation rules are typically
+written to fire in whatever direction its search happens to proceed.
+The relational treatment separates three matters that these
+artifacts conflate:
 
 \begin{enumerate}
 
@@ -441,19 +518,17 @@ preferred to another.
 
 Only the first belongs to the semantic schema.  A composition relation
 has no intrinsic traversal direction and contains no cost information.
+The other two return later as interchangeable policies over the same
+schema: evaluation direction as a search strategy---bottom-up
+Selinger versus top-down Cascades (Section~\ref{sec:demand})---and
+preference as a canonicalization policy
+(Section~\ref{sec:canonicalization}).  Keeping them out of the
+schema now is what makes them interchangeable later.
 
 \begin{example}[Join composition]
-Let
-\[
-x_R,\qquad x_S,\qquad x_{R \Join S}
-\]
-be goals, and consider the composition form
-\[
-d_{\mathsf{join}}
-=
-( x_{R \Join S} \Rightarrow x_R,x_S ).
-\]
-
+Let \(x_R\), \(x_S\), and \(x_{R \Join S}\) be goals, and consider
+the composition signature
+\(d_{\mathsf{join}} = ( x_{R \Join S} \Rightarrow x_R,x_S )\).
 The relation
 \[
 \mathcal{R}_{d_{\mathsf{join}}}
@@ -464,17 +539,9 @@ The relation
 \times
 \mathsf{N}(x_S)
 \]
-may contain tuples such as
-\[
-(\mathsf{HashJoin},r,s),
-\]
-\[
-(\mathsf{MergeJoin},r',s'),
-\]
-and
-\[
-(\mathsf{NestedLoopJoin},r'',s'').
-\]
+may contain tuples such as \((\mathsf{HashJoin},r,s)\),
+\((\mathsf{MergeJoin},r',s')\), and
+\((\mathsf{NestedLoopJoin},r'',s'')\).
 
 Membership states only that the corresponding child alternatives may
 be combined to realize the parent alternative.  It does not rank the
@@ -482,22 +549,11 @@ join methods or prescribe an order in which they are considered.
 \end{example}
 
 \begin{example}[Expression composition]
-For a binary addition form
-\[
-d_{+}
-=
-(x \Rightarrow x_1,x_2),
-\]
+For a binary addition signature \(d_{+} = (x \Rightarrow x_1,x_2)\),
 the relation
-\[
-\mathcal{R}_{d_{+}}
+\(\mathcal{R}_{d_{+}}
 \subseteq
-\mathsf{N}(x)
-\times
-\mathsf{N}(x_1)
-\times
-\mathsf{N}(x_2)
-\]
+\mathsf{N}(x)\times\mathsf{N}(x_1)\times\mathsf{N}(x_2)\)
 records which child alternatives may be combined by addition to realize
 an alternative for \(x\).
 
@@ -507,7 +563,12 @@ representations.
 \end{example}
 
 \begin{definition}[Concrete semantic schema]
-A \emph{concrete semantic schema} consists of
+\label{def:concrete-schema}
+A \emph{concrete semantic schema} is a tuple
+\[
+\mathcal S=(X,\mathsf N,\Sigma,\mathcal R)
+\]
+consisting of
 
 \begin{enumerate}
 
@@ -518,10 +579,11 @@ a finite set of goals \(X\);
 a finite set of e-nodes \(\mathsf{N}(x)\) for each \(x \in X\);
 
 \item
-a finite collection of composition forms \(d\); and
+a finite collection \(\Sigma\) of composition signatures; and
 
 \item
-a composition relation \(\mathcal{R}_d\) for each form \(d\).
+a composition relation \(\mathcal{R}_d\) for each signature
+\(d\in\Sigma\).
 
 \end{enumerate}
 \end{definition}
@@ -530,158 +592,3316 @@ The concrete schema may be much larger than an optimizer should
 materialize.  It distinguishes individual child e-nodes even when a
 parent can observe only some coarser semantic property of them.
 
-The next chapter introduces multe-classes.  Once those classes are
-available, a non-atomic parent e-node will refer to child
-multe-classes rather than to individual child e-nodes.  The resulting
-multe-graph is a quotient representation of the concrete composition
-relations defined here.
+The next subsection introduces multe-classes.  Once those classes
+are available, a non-atomic parent e-node will refer to child
+multe-classes rather than to individual child e-nodes.  The quotient
+improves the form of composition as well as its size: the relation
+\(\mathcal{R}_d\), which ranges over tuples of individual e-nodes,
+becomes a \emph{function} assigning each parent e-node one tuple of
+child multe-classes (splitting e-nodes where necessary so that each
+admits a single tuple).  Composition is relational over e-nodes but
+functional over the right quotient.  The resulting multe-graph is a
+quotient representation of the concrete composition relations
+defined here.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Semantic Quotients}
+\subsection{Semantic Quotients}
 \label{chap:quotients}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Multe-Classes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Multe-Classes}
 \label{sec:multe-classes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-This section will define a multe-class as a semantic equivalence
-class of e-nodes belonging to one goal.
+The concrete semantic schema distinguishes every e-node associated
+with a goal.  An optimizer generally need not preserve all of these
+distinctions.  It may instead treat e-nodes as interchangeable whenever
+the surrounding computation cannot observe their differences.
 
-\section{Refinement Hierarchies}
+We first consider a single semantic equivalence for a single goal.
+Families of equivalences ordered by refinement will be introduced in
+Section~\ref{sec:refinement-hierarchies}.
+
+Let \(x\in X\) be a goal, with e-node set \(\mathsf{N}(x)\).
+
+\begin{definition}[Semantic equivalence]
+A \emph{semantic equivalence} for a goal \(x\) is an equivalence
+relation
+\[
+{\equiv}\ \subseteq\ \mathsf{N}(x)\times\mathsf{N}(x).
+\]
+
+For \(n,n'\in\mathsf{N}(x)\), the judgment \(n\equiv n'\) means that
+the distinction between \(n\) and \(n'\) is not retained by this
+equivalence.
+\end{definition}
+
+\begin{definition}[Multe-class]
+Given a semantic equivalence \(\equiv\) on \(\mathsf{N}(x)\), the
+\emph{multe-class} of \(n\in\mathsf{N}(x)\) is
+\[
+[n]_{\equiv}
+=
+\{n'\in\mathsf{N}(x)\mid n'\equiv n\}.
+\]
+\end{definition}
+
+The quotient set \(\mathsf{N}(x)/{\equiv}\) is the collection of
+multe-classes induced by \(\equiv\).
+
+We refer to the choice of equivalence, informally, as a
+\emph{resolution}, by analogy with images: a finer equivalence
+retains more distinctions, a coarser one fewer.
+
+A multe-class is therefore not an arbitrary collection of e-nodes.
+It is one block of a semantic quotient of the alternatives for a
+single goal.
+
+\begin{example}[Output order]
+Let \(x_R\) be the goal of producing relation \(R\).
+Suppose the semantic equivalence \(\equiv_{\mathsf{order}}\)
+distinguishes e-nodes according to the output order they provide:
+two implementations satisfy \(n\equiv_{\mathsf{order}}n'\) when they
+provide the same relevant output order.
+
+The quotient may contain classes such as
+\[
+[R]_{\mathsf{sorted}(a)},
+\qquad
+[R]_{\mathsf{sorted}(b)},
+\qquad
+[R]_{\mathsf{unordered}}.
+\]
+
+Each class may contain many physical implementations.
+For example, two index scans using different indexes may belong to the
+same multe-class if both provide order on \(a\) and no distinction
+retained by \(\equiv_{\mathsf{order}}\) separates them.
+\end{example}
+
+\begin{example}[Coarser logical equivalence]
+At a coarser resolution \(\equiv_{\mathsf{logical}}\), output order
+may be ignored entirely.  Then all implementations that produce
+relation \(R\) belong to one class:
+\([R]_{\mathsf{any}} = \mathsf{N}(x_R)\).
+\end{example}
+
+The distinction between a goal and a multe-class is important.
+
+A goal identifies the task to be realized.
+A multe-class identifies a set of realizations that are
+interchangeable at a particular semantic resolution.
+All members of \([R]_{\mathsf{sorted}(a)}\) realize the goal
+\(x_R\), but they additionally agree on a property that may matter
+to composition.
+
+Likewise, the distinction between a multe-class and a preferred
+representative is important.
+Membership in a multe-class expresses semantic interchangeability at
+one resolution.
+It says nothing about cost and chooses no representative.
+Selection among the members of a multe-class is deferred to
+canonicalization.
+
+The multe-classes induced by a single semantic equivalence
+\(\equiv\) form a partition of \(\mathsf{N}(x)\):
+\[
+\mathsf{N}(x)
+=
+\biguplus_{C\in \mathsf{N}(x)/{\equiv}} C.
+\]
+
+A single semantic equivalence gives one partition of
+\(\mathsf{N}(x)\).  Our intended structure contains several such
+equivalences, ordered by refinement.  A finer equivalence preserves
+distinctions that a coarser equivalence forgets.
+
+We next define the compatibility conditions among these
+equivalences and relate them to a tree-shaped representation of nested
+multe-classes.  In that representation, any cut that covers all leaves
+corresponds to one partition of \(\mathsf{N}(x)\); the tree as a whole
+does not constitute a single partition.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Refinement Hierarchies}
 \label{sec:refinement-hierarchies}
-
-We will begin with tree-shaped hierarchies and later replace them
-with compatible quotient families ordered by refinement.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Multe-Graphs}
-\label{chap:multe-graphs}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Definition}
+A single semantic equivalence determines one partition of the e-nodes
+for a goal.  Our intended structure retains several such equivalences,
+ranging from fine distinctions to coarse ones.
+
+We begin with the simplest case: a finite linear hierarchy of semantic
+equivalences.  This assumption produces a tree-shaped hierarchy of
+multe-classes.  More general partially ordered families of quotients
+will be considered later.
+
+Let \(x\in X\) be a goal, with e-node set \(\mathsf{N}(x)\).
+
+\begin{definition}[Refinement]
+Let \(\equiv_1\) and \(\equiv_2\) be semantic equivalences on
+\(\mathsf{N}(x)\).
+
+We say that \(\equiv_1\) \emph{refines} \(\equiv_2\), written
+\(\equiv_1 \preceq \equiv_2\), when
+\[
+n\equiv_1 n'
+\quad\Longrightarrow\quad
+n\equiv_2 n'
+\]
+for all \(n,n'\in\mathsf{N}(x)\).  Equivalently,
+\({\equiv_1}\subseteq{\equiv_2}\) as binary relations.
+\end{definition}
+
+Thus \(\equiv_1\preceq\equiv_2\) means that \(\equiv_1\) is finer:
+it may distinguish e-nodes that \(\equiv_2\) identifies.
+
+Refinement can also be stated in terms of classes.
+
+\begin{proposition}
+If \(\equiv_1\preceq\equiv_2\), then every multe-class induced by
+\(\equiv_1\) is contained in a unique multe-class induced by
+\(\equiv_2\).
+\end{proposition}
+
+\begin{proof}
+Let \(C=[n]_{\equiv_1}\).
+For every \(n'\in C\), we have \(n'\equiv_1 n\), and therefore
+\(n'\equiv_2 n\).  Hence \(C\subseteq[n]_{\equiv_2}\).
+Uniqueness follows because the \(\equiv_2\)-classes form a partition of
+\(\mathsf{N}(x)\).
+\end{proof}
+
+This containment property allows classes belonging to different
+equivalences to be organized into a hierarchy.
+
+\begin{definition}[Linear refinement hierarchy]
+A \emph{linear refinement hierarchy} for a goal \(x\) is a finite
+sequence of semantic equivalences
+\[
+\equiv_0
+\preceq
+\equiv_1
+\preceq
+\cdots
+\preceq
+\equiv_h
+\]
+on \(\mathsf{N}(x)\), where the coarsest equivalence
+\(\equiv_h\) is universal:
+\[
+n\equiv_h n'
+\qquad
+\text{for all }n,n'\in\mathsf{N}(x).
+\]
+
+The equivalence \(\equiv_0\) is the finest equivalence represented by
+the hierarchy.
+It need not be equality.
+\end{definition}
+
+The universal equivalence contributes the root class
+\(\mathsf{N}(x)\).
+Every class at a finer level is contained in a unique class at every
+coarser level.
+
+\begin{definition}[Tree of multe-classes]
+Given a linear refinement hierarchy
+\(\equiv_0\preceq\cdots\preceq\equiv_h\),
+its \emph{multe-class tree} is the inclusion hierarchy formed by all
+distinct classes appearing in the quotients
+\[
+\mathsf{N}(x)/{\equiv_0},
+\ldots,
+\mathsf{N}(x)/{\equiv_h}.
+\]
+
+The root is \(\mathsf{N}(x)\).
+The parent of a non-root class \(C\) is its least strict superclass
+among the represented multe-classes.
+\end{definition}
+
+Because the equivalences are linearly ordered by refinement, every
+non-root class has a unique parent.  The resulting inclusion structure
+is therefore a rooted tree after duplicate classes are identified.
+
+The leaves need not be singletons.  If the finest represented
+equivalence \(\equiv_0\) still identifies several e-nodes, then those
+e-nodes remain together in a leaf multe-class.  The hierarchy records
+only the distinctions represented by the schema, not necessarily every
+distinction among concrete e-nodes.
+
+\begin{example}[Output-order hierarchy]
+Let \(x_R\) be the goal of producing relation \(R\).
+
+At a fine equivalence \(\equiv_{\mathsf{order}}\), implementations are
+identified only when they provide the same relevant output order.  The
+resulting quotient may contain
+\[
+[R]_{\mathsf{sorted}(a)},
+\qquad
+[R]_{\mathsf{sorted}(b)},
+\qquad
+[R]_{\mathsf{unordered}}.
+\]
+
+At a coarser equivalence \(\equiv_{\mathsf{logical}}\), output order
+is ignored: \([R]_{\mathsf{any}} = \mathsf{N}(x_R)\).
+
+We then have
+\(\equiv_{\mathsf{order}} \preceq \equiv_{\mathsf{logical}}\),
+and correspondingly each of
+\([R]_{\mathsf{sorted}(a)}\), \([R]_{\mathsf{sorted}(b)}\), and
+\([R]_{\mathsf{unordered}}\) is contained in
+\([R]_{\mathsf{any}}\).
+\end{example}
+
+A single e-node therefore belongs to one class at each equivalence in
+the hierarchy.  For example, an implementation that produces order on
+\(a\) belongs both to \([R]_{\mathsf{sorted}(a)}\) under
+\(\equiv_{\mathsf{order}}\), and to \([R]_{\mathsf{any}}\) under
+\(\equiv_{\mathsf{logical}}\).
+
+These memberships are not competing classifications.  They describe
+the same e-node at different degrees of semantic distinction.
+
+\begin{definition}[Cut]
+A \emph{cut} of a multe-class tree is a collection \(\mathcal{K}\)
+of pairwise incomparable multe-classes such that every leaf is
+contained in exactly one member of \(\mathcal{K}\).
+\end{definition}
+
+Every cut partitions the e-node set:
+\[
+\mathsf{N}(x)
+=
+\biguplus_{C\in\mathcal{K}} C.
+\]
+
+A cut need not consist of all classes from one equivalence in the
+original linear hierarchy.  It may select a fine class in one branch
+and a coarse class in another.  Such nonuniform cuts will become
+important when requirements preserve some semantic distinctions while
+allowing others to collapse.
+
+The distinction between the hierarchy and a cut is therefore
+fundamental.
+
+The hierarchy records every represented semantic distinction.
+A cut records one current partition of the alternatives obtained by
+choosing which distinctions remain visible in each branch.
+
+So far, each goal has been considered in isolation.
+The next subsection combines these refinement hierarchies with
+composition.  A parent e-node will refer to child multe-classes at the
+coarsest points in their hierarchies sufficient for that parent
+alternative.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Multe-Graphs}
+\label{sec:multe-graphs}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+A concrete semantic schema describes composition in terms of
+individual e-nodes.  A refinement hierarchy describes which
+distinctions among those e-nodes may be forgotten.  A
+\emph{multe-graph} combines these two structures.
+
+As in an ordinary e-graph, a non-atomic e-node references classes of
+possible children rather than selecting particular child e-nodes.
+Unlike an ordinary e-graph, each referenced class may occur at any
+represented point in its goal's refinement hierarchy.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Definition}
 \label{sec:multe-graph-definition}
-
-A multe-graph combines an e-graph-style compositional graph with
-a hierarchy of multe-classes for each goal.
-Composite e-nodes reference child multe-classes.
-
-\section{Semantic Soundness}
-\label{sec:multe-graph-soundness}
-
-This section will state the local compatibility conditions
-required for quotienting and composition to agree.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Problem Instances}
-\label{chap:instances}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Requirements}
-\label{sec:requirements}
+For each goal \(x\), let \(\mathcal C(x)\) denote the collection of
+all multe-classes appearing in its refinement hierarchy.
 
-We will first treat Boolean requirements attached at the root,
-then allow requirements to attach to arbitrary classes,
-operators, or composition positions.
+Let \(n\in\mathsf N(x)\) be a non-atomic e-node with composition
+signature \(\sigma(n) = d = (x\Rightarrow x_1,\ldots,x_k)\).
 
-\section{Propagation}
+Its concrete composition fiber is
+\[
+\mathcal R_d[n]
+=
+\left\{
+(n_1,\ldots,n_k)
+\;\middle|\;
+(n,n_1,\ldots,n_k)\in\mathcal R_d
+\right\}.
+\]
+
+A \emph{fiber} is simply an inverse image at a point:
+\(\mathcal R_d[n]\) collects the child tuples that the relation
+pairs with \(n\).
+
+\begin{definition}[Child references]
+The \emph{child references} of \(n\) are a typed tuple
+\[
+\chi(n)
+=
+(C_1,\ldots,C_k)
+\in
+\mathcal C(x_1)\times\cdots\times\mathcal C(x_k)
+\]
+such that
+\[
+\mathcal R_d[n]
+=
+C_1\times\cdots\times C_k.
+\]
+
+An atomic e-node has the empty tuple of child references.
+\end{definition}
+
+Thus each non-atomic e-node has one fixed tuple of referenced
+multe-classes.  The tuple represents exactly the concrete child
+configurations admissible for that e-node.
+
+Read patiently, the requirement on \(\chi(n)\) says that \(n\)
+appears in the relation once for every combination of members drawn
+from its referenced classes, and for no others: if \(n\) admits
+child alternatives slot-wise, it admits every mixture of them, and
+the child positions never interact.  We call this the
+\emph{Cartesian-fiber condition}.  Combinatorialists call a
+Cartesian product of sets a \emph{rectangle}, after the
+two-dimensional case, in which the tuples of \(C_1\times C_2\) form
+a solid block in the matrix of the relation; in that vocabulary, the
+condition says the inverse image of each e-node is one full
+rectangle.  Both vocabularies earn their keep later, when e-nodes
+are counted (Remark~\ref{rem:rectangles}).
+
+If a concrete composition fiber cannot be expressed as one Cartesian
+product of multe-classes, it is represented by multiple e-nodes, each
+with its own child-reference tuple.
+
+\begin{definition}[Multe-graph]
+A \emph{multe-graph} is a tuple
+\[
+\mathcal G=(\mathcal S,\mathcal C,\chi)
+\]
+consisting of
+
+\begin{enumerate}
+
+\item
+a concrete semantic schema
+\(\mathcal S=(X,\mathsf N,\Sigma,\mathcal R)\)
+(Definition~\ref{def:concrete-schema});
+
+\item
+a refinement hierarchy of multe-classes
+\(\mathcal C(x)\) for each goal \(x\); and
+
+\item
+a child-reference tuple \(\chi(n)\) satisfying the condition above for
+every non-atomic e-node \(n\).
+
+\end{enumerate}
+\end{definition}
+
+A multe-graph contains three orthogonal relations:
+
+\begin{itemize}
+
+\item
+\emph{membership}: multe-classes contain e-nodes;
+
+\item
+\emph{refinement}: finer multe-classes are contained in coarser ones;
+and
+
+\item
+\emph{composition}: non-atomic e-nodes reference multe-classes of
+subgoals.
+
+\end{itemize}
+
+The child reference \(C_i\) records precisely the distinctions among
+the \(i\)-th subgoal realizations that the parent e-node observes.
+Any member of \(C_i\) may be used, and no realization outside \(C_i\)
+may be used.
+
+\begin{example}[Join alternatives]
+Let
+\[
+d_{\mathsf{join}}
+=
+(x_{R\Join S}\Rightarrow x_R,x_S).
+\]
+
+Suppose the input hierarchies contain
+\[
+[R]_{\mathsf{sorted}(a)}
+\subseteq
+[R]_{\mathsf{any}}
+\]
+and
+\[
+[S]_{\mathsf{sorted}(a)}
+\subseteq
+[S]_{\mathsf{any}}.
+\]
+
+A hash-join e-node may have child references
+\[
+\chi(n_{\mathsf{hash}})
+=
+\bigl(
+[R]_{\mathsf{any}},
+[S]_{\mathsf{any}}
+\bigr),
+\]
+while a merge-join e-node may have
+\[
+\chi(n_{\mathsf{merge}})
+=
+\bigl(
+[R]_{\mathsf{sorted}(a)},
+[S]_{\mathsf{sorted}(a)}
+\bigr).
+\]
+
+Neither e-node selects particular implementations of \(R\) or \(S\).
+Each identifies exactly the classes of implementations admissible at
+its child positions.
+\end{example}
+
+Figure~\ref{fig:selinger-multe-graph} displays the refinement and
+composition structures together.  Nesting records refinement among
+multe-classes, while arrows record the child references of the
+non-atomic join e-nodes.
+
+\begin{figure}[t]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[
+  enode/.style={draw, rounded corners=2pt, fill=white,
+    inner xsep=5pt, inner ysep=3pt, font=\small},
+  mclass/.style={draw, rounded corners=5pt, inner sep=5pt},
+  sortedbox/.style={draw, rounded corners=4pt, inner sep=4pt},
+  classlabel/.style={fill=white, inner sep=1pt, font=\small},
+  goal/.style={font=\small\bfseries},
+  ref/.style={-{Latex[length=2.2mm]}, semithick},
+  anyref/.style={ref, dashed},
+  sortedref/.style={ref}
+]
+
+% ===== Parent goal x_{R Join S} =====
+\node[enode] (merge) at (-1.4,0) {$\mathsf{MergeJoin}_a$};
+\node[enode, right=9mm of merge] (hash) {$\mathsf{HashJoin}$};
+\node[classlabel, anchor=south west] (RSsortedlab)
+  at ([xshift=-3pt,yshift=2.2mm]merge.north west)
+  {$[R\Join S]_{\mathsf{sorted}(a)}$};
+\node[sortedbox, fit=(merge)(RSsortedlab)] (RSsorted) {};
+\node[classlabel, anchor=south west] (RSanylab)
+  at ([xshift=-3pt,yshift=2.2mm]RSsorted.north west)
+  {$[R\Join S]_{\mathsf{any}}$};
+\node[mclass, fit=(RSsorted)(hash)(RSanylab)] (RSany) {};
+\node[goal, above=2.5mm of RSany] {$x_{R\Join S}$};
+
+% ===== Child goal x_R =====
+\node[enode] (rindex) at (-4.7,-4.0) {$\mathsf{IndexScan}_a$};
+\node[enode, right=8mm of rindex] (rtable) {$\mathsf{TableScan}$};
+\node[classlabel, anchor=south west] (Rsortedlab)
+  at ([xshift=-3pt,yshift=2.2mm]rindex.north west)
+  {$[R]_{\mathsf{sorted}(a)}$};
+\node[sortedbox, fit=(rindex)(Rsortedlab)] (Rsorted) {};
+\node[classlabel, anchor=south west] (Ranylab)
+  at ([xshift=-3pt,yshift=2.2mm]Rsorted.north west)
+  {$[R]_{\mathsf{any}}$};
+\node[mclass, fit=(Rsorted)(rtable)(Ranylab)] (Rany) {};
+\node[goal, below=2.5mm of Rany] {$x_R$};
+
+% ===== Child goal x_S =====
+\node[enode] (sindex) at (1.9,-4.0) {$\mathsf{IndexScan}_a$};
+\node[enode, right=8mm of sindex] (stable) {$\mathsf{TableScan}$};
+\node[classlabel, anchor=south west] (Ssortedlab)
+  at ([xshift=-3pt,yshift=2.2mm]sindex.north west)
+  {$[S]_{\mathsf{sorted}(a)}$};
+\node[sortedbox, fit=(sindex)(Ssortedlab)] (Ssorted) {};
+\node[classlabel, anchor=south west] (Sanylab)
+  at ([xshift=-3pt,yshift=2.2mm]Ssorted.north west)
+  {$[S]_{\mathsf{any}}$};
+\node[mclass, fit=(Ssorted)(stable)(Sanylab)] (Sany) {};
+\node[goal, below=2.5mm of Sany] {$x_S$};
+
+% ===== Child-reference functions =====
+\draw[sortedref] (merge.south) to[bend right=12] (Rsorted.north);
+\draw[sortedref] (merge.south) to[bend left=22]  (Ssorted.north);
+\draw[anyref]    (hash.south)  to[bend right=24] (Rany.north east);
+\draw[anyref]    (hash.south)  to[bend left=10]  (Sany.north west);
+
+\end{tikzpicture}%
+}
+
+\caption{
+A multe-graph for a Selinger-style join.
+Nested boxes are multe-classes and rounded interior boxes are
+e-nodes.
+The merge-join node references the sorted input classes, while
+the hash-join node references the coarser input classes.
+Solid arrows denote the sorted references; dashed arrows denote
+the coarser references.
+}
+\Description{A multe-graph with three nested-box clusters: a parent
+join goal above two child goals for the base relations R and S. Each
+cluster is an outer ``any'' multe-class box containing a nested
+``sorted(a)'' multe-class box. The parent's sorted box holds a
+merge-join e-node and its any box also holds a hash-join e-node; each
+child's sorted box holds an index-scan e-node and its any box also
+holds a table-scan e-node. Solid arrows run from the merge-join node
+to the two children's sorted boxes; dashed arrows run from the
+hash-join node to the two children's any boxes.}
+\label{fig:selinger-multe-graph}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Problem Instances}
+\label{sec:instances}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+A multe-graph is a schema for a family of related problems.
+It records the available e-nodes, their composition, and the semantic
+distinctions represented by the multe-class hierarchies.
+A particular problem instance is obtained by registering
+\emph{requirements} with nodes of that schema.
+
+We begin with Boolean requirements.
+More expressive requirement domains will be considered later.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Requirement Predicates}
+\label{sec:requirement-predicates}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Let \(C\in\mathcal C(x)\) be a multe-class for some goal \(x\).
+
+\begin{definition}[Requirement]
+A requirement on \(C\) is a predicate
+\[
+\rho:C\longrightarrow\{\mathsf{true},\mathsf{false}\}.
+\]
+
+The e-nodes in \(C\) that satisfy the requirement are
+\[
+C\!\restriction_{\rho}
+=
+\{n\in C\mid \rho(n)=\mathsf{true}\}.
+\]
+\end{definition}
+
+In this section we restrict attention to \emph{local requirements}.
+A local requirement can be evaluated from the e-node itself:
+\(\rho(n)\) does not depend on which realizations are selected
+beneath \(n\).
+
+The multe-class \(C\) and the requirement \(\rho\) play different
+roles.
+
+The class \(C\) is part of the semantic schema.
+It records a set of e-nodes that are interchangeable under one
+represented semantic equivalence.
+
+The requirement \(\rho\) is part of a problem instance.
+It restricts the members of \(C\) that remain admissible for that
+instance.
+
+A requirement need not coincide with a represented multe-class.
+A requirement on \(C\) may select any subset of \(C\).
+When a desired subset is already represented by a nested
+multe-class, however, that class induces a requirement in the obvious
+way.
+
+\begin{definition}[Class-induced requirement]
+Let \(D,C\in\mathcal C(x)\) with \(D\subseteq C\).
+The requirement on \(C\) induced by \(D\) is the characteristic
+predicate
+\(\rho_D(n) \Leftrightarrow n\in D\).
+Its satisfying set is exactly \(C\!\restriction_{\rho_D}=D\).
+\end{definition}
+
+Thus selecting a multe-class and imposing a requirement are not
+different mechanisms.
+Selecting a represented subclass is one particularly simple
+requirement.
+
+Requirements induced by represented multe-classes are local.  For
+example, whether a root e-node belongs to
+\([R\Join S]_{\mathsf{sorted}(a)}\) is intrinsic to that e-node's
+provided semantics.
+
+Several requirements may be registered at the same class.
+Their conjunction, \((\rho_1\wedge\rho_2)(n) =
+\rho_1(n)\wedge\rho_2(n)\), is again a requirement, so we may treat
+any finite collection of requirements at one site as a single
+predicate.
+
+Requirements may be imposed on multiple multe-classes in a graph.
+A requirement on an internal class may, for example, rule out sorting
+implementations, require a particular execution device, or impose a
+resource restriction.
+In the next subsection we begin with the simplest case: a single
+requirement registered at the root.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Root Requirements}
+\label{sec:root-requirements}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+A problem instance designates one goal as the result to be realized.
+Let \(x_\star\in X\) be that root goal.  Its refinement hierarchy
+has the universal root class
+\(C^\top_\star = \mathsf N(x_\star)\).
+
+\begin{definition}[Root requirement]
+A \emph{root requirement} is a predicate
+\[
+\rho_\star:
+C^\top_\star
+\longrightarrow
+\{\mathsf{true},\mathsf{false}\}
+\]
+registered at the universal multe-class of the root goal.
+\end{definition}
+
+The satisfying set \(C^\top_\star\!\restriction_{\rho_\star}\)
+contains the root e-nodes that provide an acceptable result for the
+instance.
+
+\begin{definition}[Root-only problem instance]
+A \emph{root-only problem instance} is a tuple
+\[
+I=(\mathcal G,x_\star,\rho_\star),
+\]
+where
+
+\begin{enumerate}
+
+\item
+\(\mathcal G\) is a multe-graph;
+
+\item
+\(x_\star\) is the root goal; and
+
+\item
+\(\rho_\star\) is a requirement registered at
+\(C^\top_\star=\mathsf N(x_\star)\).
+
+\end{enumerate}
+\end{definition}
+
+The predicate that is identically true expresses no additional
+restriction:
+\[
+\rho_{\mathsf{any}}(n)=\mathsf{true}
+\qquad
+\text{for every }n\in C^\top_\star.
+\]
+
+A more selective root requirement may be induced by a nested
+multe-class.
+
+\begin{example}[The running join queries]
+Let \(x_\star=x_{R\Join S}\),
+and suppose the root hierarchy contains
+\[
+[R\Join S]_{\mathsf{sorted}(a)}
+\subseteq
+[R\Join S]_{\mathsf{any}},
+\]
+where
+\[
+[R\Join S]_{\mathsf{any}}
+=
+\mathsf N(x_{R\Join S}).
+\]
+
+The query
+\[
+\texttt{SELECT * FROM R JOIN S}
+\]
+imposes the root requirement
+\(\rho_{\mathsf{any}}(n)=\mathsf{true}\).
+
+The query
+\[
+\texttt{SELECT * FROM R JOIN S ORDER BY R.a}
+\]
+imposes the class-induced root requirement
+\[
+\rho_{\mathsf{sorted}(a)}(n)
+\quad\Longleftrightarrow\quad
+n\in[R\Join S]_{\mathsf{sorted}(a)}.
+\]
+
+The two queries therefore share one multe-graph.
+They differ only in the predicate registered at its root.
+\end{example}
+
+This formulation also permits root requirements that do not correspond
+to a pre-existing multe-class.
+For example, a predicate in a distributed database might only accept root e-nodes with a ``location'' label set to the client location.
+Whether such a requirement should itself be added to the schema as a
+new represented semantic class is a separate design question.
+
+A root requirement restricts the admissible root e-nodes, but its
+consequences are not confined to the root.
+The surviving root e-nodes reference child multe-classes; requirements
+on those classes may in turn affect their parents.
+The next subsection defines how registered requirements propagate
+through the multe-graph and produce a problem-specific instantiated
+graph.
+
+Before we get there, note that not every useful requirement is local.
+An \emph{aggregate requirement} depends on values computed from the
+realizations selected for an e-node's children.  Total cost, latency,
+memory consumption, and energy use are typical examples.
+
+Aggregate requirements require additional compositional structure:
+each non-atomic e-node must specify how child values are combined into
+a parent value.  Propagating such a requirement then requires
+distributing it through that aggregation function to obtain
+requirements or bounds on the children.  We postpone this extension
+until we introduce cost-based optimization, where it will also support
+branch-and-bound pruning.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Propagation and Instantiation}
 \label{sec:propagation}
-
-This section will define the propagated instance as a least
-fixed point of local dependency rules.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Canonicalization}
-\label{chap:canonicalization}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Canonicalization Policies}
+A root requirement identifies acceptable root e-nodes.
+Not every such e-node necessarily participates in a complete
+realization: a non-atomic e-node is usable only if each of its
+referenced child multe-classes contains a usable e-node.
+
+Propagation therefore has two directions.
+
+\begin{enumerate}
+
+\item
+\emph{Realizability} is computed upward from atomic e-nodes.
+
+\item
+\emph{Liveness} is propagated downward from the root e-nodes that
+satisfy the requirement.
+
+\end{enumerate}
+
+We continue to assume that the multe-graph is finite and acyclic, so
+both notions can be defined inductively.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Realizability}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{definition}[Realizable e-node]
+An atomic e-node is \emph{realizable}.
+
+A non-atomic e-node \(n\), with child references
+\(\chi(n)=(C_1,\ldots,C_k)\),
+is realizable when every referenced child class contains at least one
+realizable e-node.
+\end{definition}
+
+For a goal \(x\), let
+\(\mathsf{Real}(x) =
+\{n\in\mathsf N(x)\mid n\text{ is realizable}\}\),
+and for a multe-class \(C\in\mathcal C(x)\), let
+\(\mathsf{Real}(C) = C\cap\mathsf{Real}(x)\).
+Thus \(n\) is realizable exactly when
+\(\mathsf{Real}(C_i)\neq\varnothing\) for every child reference
+\(C_i\).
+
+Realizability does not depend on the root requirement.  It removes
+dead ends already present in the schema.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{Root Candidates and Liveness}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Let \(I=(\mathcal G,x_\star,\rho_\star)\)
+be a root-only problem instance.
+The realizable root e-nodes satisfying the root requirement are
+\[
+\mathsf{Root}(I)
+=
+\left\{
+n\in\mathsf{Real}(x_\star)
+\;\middle|\;
+\rho_\star(n)=\mathsf{true}
+\right\}.
+\]
+
+If \(\mathsf{Root}(I)=\varnothing\),
+then the problem instance is unsatisfiable.
+Otherwise, these e-nodes initiate downward propagation.
+
+\begin{definition}[Live e-node]
+The set of \emph{live e-nodes} for \(I\), written
+\(\mathsf{Live}(I)\),
+is the least set satisfying the following rules.
+
+\begin{enumerate}
+
+\item
+Every acceptable realizable root e-node is live:
+\(\mathsf{Root}(I)\subseteq\mathsf{Live}(I)\).
+
+\item
+If \(n\in\mathsf{Live}(I)\) and
+\(\chi(n)=(C_1,\ldots,C_k)\),
+then every realizable e-node in every referenced child class is live:
+\[
+\mathsf{Real}(C_i)\subseteq\mathsf{Live}(I)
+\qquad
+\text{for each }i.
+\]
+
+\end{enumerate}
+\end{definition}
+
+This closure retains every realizable alternative that may contribute
+to a realization satisfying the root requirement.  It does not choose
+one alternative from any class.
+
+For each goal \(x\), define its live e-node set by
+\(\mathsf N_I(x) = \mathsf N(x)\cap\mathsf{Live}(I)\).
+
+A multe-class is \emph{referenced in \(I\)} if it occurs in
+\(\chi(n)\) for some live non-atomic e-node \(n\).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{The Instantiated Multe-Graph}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+We obtain the problem-specific graph by restricting both e-nodes and
+multe-classes to the live portion of the schema.
+
+For every referenced multe-class \(C\in\mathcal C(x)\),
+define its restriction to \(I\) by
+\(C\!\restriction_I = C\cap\mathsf N_I(x)\).
+The active universe \(\mathsf N_I(x)\)
+serves as the root multe-class for each live goal \(x\).
+
+\begin{definition}[Instantiated multe-graph]
+The \emph{instantiated multe-graph} for \(I\), written
+\(\mathcal G\!\restriction_I\),
+is obtained as follows.
+
+\begin{enumerate}
+
+\item
+For each goal \(x\), retain the live e-nodes \(\mathsf N_I(x)\).
+
+\item
+Retain the nonempty restrictions \(C\!\restriction_I\)
+of all multe-classes referenced by live e-nodes, together with the
+active root class \(\mathsf N_I(x)\).
+
+\item
+Identify restricted classes that have become equal, and order the
+remaining classes by inclusion.
+
+\item
+For every live non-atomic e-node \(n\) with
+\(\chi(n)=(C_1,\ldots,C_k)\),
+replace its child references by
+\[
+\chi_I(n)
+=
+\bigl(
+C_1\!\restriction_I,\ldots,
+C_k\!\restriction_I
+\bigr).
+\]
+
+\end{enumerate}
+\end{definition}
+
+Because the original multe-classes form a tree, any two classes are
+\emph{laminar}: either nested or disjoint.  Intersecting them with the same live
+e-node set preserves the \emph{laminarity} property: if
+\(C\subseteq D\), then
+\(C\cap\mathsf N_I(x) \subseteq D\cap\mathsf N_I(x)\),
+and if \(C\cap D=\varnothing\), their restrictions remain disjoint.
+
+Identifying equal restrictions removes boundaries that no longer
+distinguish any live e-nodes, so once empty restrictions are discarded
+and equal ones identified, the remaining classes again form a
+tree-shaped refinement hierarchy.
+
+Classes that are neither selected at the root nor referenced by a live
+e-node do not appear in the instantiated graph.  Their distinctions
+cannot be observed by any realization satisfying the root requirement.
+
+This is the first sense in which a multe-graph is distilled.
+The original graph records every distinction that may matter to some
+problem instance; the instantiated graph retains only distinctions
+reachable through realizable alternatives from the current root
+requirement.
+
+Because a live e-node retains every realizable member of each
+referenced child class, its instantiated child space remains a
+Cartesian product:
+\[
+\mathsf{Real}(C_1)
+\times\cdots\times
+\mathsf{Real}(C_k).
+\]
+Thus instantiation preserves the well-formedness condition built into
+the definition of a multe-graph.
+
+\begin{example}[The running join instances]
+Suppose the root hierarchy contains
+\[
+[R\Join S]_{\mathsf{sorted}(a)}
+\subseteq
+[R\Join S]_{\mathsf{any}}.
+\]
+
+For the query
+\[
+\texttt{SELECT * FROM R JOIN S},
+\]
+the root requirement accepts every root e-node.
+If both hash join and merge join are realizable, both become live.
+Their child references make the coarse and sorted input classes live,
+respectively.
+
+For the query
+\[
+\texttt{SELECT * FROM R JOIN S ORDER BY R.a},
+\]
+the root requirement accepts only e-nodes in
+\([R\Join S]_{\mathsf{sorted}(a)}\).
+If merge join is the only realizable e-node in that class, then its
+references make
+\[
+[R]_{\mathsf{sorted}(a)}
+\qquad\text{and}\qquad
+[S]_{\mathsf{sorted}(a)}
+\]
+live.
+
+In either case, all realizable e-nodes in each referenced input class
+remain available.  Instantiation prunes unreachable alternatives but
+does not yet select representatives.
+\end{example}
+
+Instantiation determines which alternatives and semantic distinctions
+survive the root requirement.  Choosing among the surviving
+alternatives is the separate task of canonicalization.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Canonicalization}
+\label{sec:canonicalization}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Instantiation removes alternatives that cannot contribute to a
+realization satisfying the problem requirements.  It may nevertheless
+leave many e-nodes in each surviving multe-class.
+
+Canonicalization performs a separate task: it chooses how each
+surviving class will be represented.
+
+In the setting considered here, canonicalization represents every
+surviving multe-class by exactly one of its e-nodes.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Canonicalization Policies}
 \label{sec:canonicalization-policies}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-Canonicalization will be defined independently of requirements
-and semantic quotienting.
+Let \(\mathcal G\!\restriction_I\)
+be the instantiated multe-graph for a satisfiable problem instance
+\(I\).  For each goal \(x\), let \(\mathcal C_I(x)\)
+denote the nonempty multe-classes retained in the instantiated
+graph, and let
+\(\mathcal C_I = \bigcup_{x\in X}\mathcal C_I(x)\).
 
-\section{Scalar Optimization}
+\begin{definition}[Canonicalization]
+A \emph{canonicalization} of
+\(\mathcal G\!\restriction_I\) is an assignment \(\kappa\)
+that selects one e-node from every retained multe-class:
+\[
+\kappa(C)\in C
+\qquad
+\text{for every }C\in\mathcal C_I.
+\]
+
+The selected e-node \(\kappa(C)\) is the
+\emph{canonical representative} of \(C\).
+\end{definition}
+
+Because every retained class is nonempty, a canonicalization always
+exists in the finite setting considered here.  The definition does not
+yet specify which member should be selected.
+
+\begin{definition}[Canonicalization policy]
+A \emph{canonicalization policy} is a rule that produces a
+canonicalization for each instantiated multe-graph in its domain.
+\end{definition}
+
+The distinction between requirements and canonicalization is now
+precise.
+
+A requirement restricts the admissible members of a class:
+\(C \mapsto C\!\restriction_{\rho}\).
+Canonicalization acts only after those restrictions have been
+propagated and selects one of the surviving members:
+\(C\!\restriction_{\rho} \mapsto
+\kappa(C\!\restriction_{\rho})\).
+
+A requirement may leave several admissible alternatives.
+Canonicalization deliberately removes that remaining multiplicity.
+
+Canonicalization does not alter the semantic meaning of a
+multe-class.  Since \(\kappa(C)\in C\),
+the selected e-node provides the semantics represented by \(C\).
+The policy determines which such provider is retained.
+
+Selections for nested multe-classes are independent.  If
+\(C\subseteq D\), there is no requirement that
+\(\kappa(C)=\kappa(D)\).
+The two classes represent different semantic contracts and may have
+different preferred representatives.
+
+\begin{example}[Canonical representatives for the running join]
+Suppose an instantiated graph contains
+\[
+[R\Join S]_{\mathsf{sorted}(a)}
+\subseteq
+[R\Join S]_{\mathsf{any}}.
+\]
+
+A canonicalization may select
+\(\kappa\bigl([R\Join S]_{\mathsf{any}}\bigr) = n_{\mathsf{hash}}\)
+and
+\(\kappa\bigl([R\Join S]_{\mathsf{sorted}(a)}\bigr) =
+n_{\mathsf{merge}}\).
+There is no conflict between these choices.
+The hash join represents the coarser class of arbitrary join plans,
+while the merge join represents the finer class of plans that provide
+the required order.
+\end{example}
+
+A selected non-atomic e-node continues to reference child
+multe-classes.  Canonicalization supplies one representative for each
+of those classes as well.  Thus, beginning from a root class and
+repeatedly following the selected e-nodes and their child references
+determines a complete realization, and because the current
+multe-graphs are acyclic, this recursive process terminates at atomic
+e-nodes.
+
+Canonicalization therefore reduces the instantiated multe-graph to one
+compositional choice per surviving semantic class.  It does not,
+however, explain why those choices are preferable.
+
+An arbitrary policy may select arbitrary members.  An optimization
+policy must instead compare complete realizations according to an
+objective such as cost.  Since the value of a non-atomic realization
+generally depends on the values of its children, defining such a policy
+requires a compositional account of aggregate attributes.  We introduce
+that structure next.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Extraction}
+\label{sec:extraction}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Instantiation and canonicalization together determine a complete
+realization of the root goal.
+
+Let \(I=(\mathcal G,x_\star,\rho_\star)\)
+be a satisfiable problem instance, let
+\(\mathcal G\!\restriction_I\)
+be its instantiated multe-graph, and let \(\kappa\)
+be a canonicalization of that graph.
+The active root class is
+\(C^\star_I=\mathsf N_I(x_\star)\).
+By construction, every e-node in \(C^\star_I\) is realizable and
+satisfies the root requirement.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Extracted Realizations}
+\label{sec:extracted-realizations}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Canonicalization selects an e-node from each retained multe-class.
+The selected e-node may itself reference child multe-classes, whose
+selected e-nodes must in turn be followed.
+
+\begin{definition}[Extracted realization]
+Let \(C\) be a retained multe-class, and let \(n=\kappa(C)\).
+The \emph{realization extracted from \(C\)}, written
+\(\mathsf{Extract}_{\kappa}(C)\),
+is defined recursively as follows.
+If \(n\) is atomic, then
+\(\mathsf{Extract}_{\kappa}(C) = \langle n\rangle\).
+If \(n\) is non-atomic and has instantiated child references
+\(\chi_I(n)=(C_1,\ldots,C_k)\),
+then
+\[
+\mathsf{Extract}_{\kappa}(C)
+=
+\left\langle
+n,
+\mathsf{Extract}_{\kappa}(C_1),
+\ldots,
+\mathsf{Extract}_{\kappa}(C_k)
+\right\rangle.
+\]
+\end{definition}
+
+Because the instantiated multe-graph is acyclic, this recursion
+terminates at atomic e-nodes.
+
+The extracted realization may be viewed as a tree.  If repeated
+references to the same multe-class share their extracted
+realization, it may instead be represented as a directed acyclic
+graph.  This distinction affects representation but not semantics.
+
+\begin{definition}[Extraction]
+Given a problem instance \(I\) and a canonicalization \(\kappa\) of
+its instantiated multe-graph, the \emph{extraction result} is
+\[
+\mathsf{Extract}(I,\kappa)
+=
+\mathsf{Extract}_{\kappa}(C^\star_I).
+\]
+\end{definition}
+
+Thus extraction has three conceptual steps:
+
+\begin{enumerate}
+
+\item
+propagate the requirements to obtain
+\(\mathcal G\!\restriction_I\);
+
+\item
+canonicalize each retained multe-class; and
+
+\item
+follow the canonical choices recursively from the active root class.
+
+\end{enumerate}
+
+No evaluation order or search algorithm is part of this definition.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Correctness}
+\label{sec:extraction-correctness}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{proposition}[Validity of extraction]
+For every retained multe-class \(C\),
+\(\mathsf{Extract}_{\kappa}(C)\)
+is a concrete realization of the goal associated with \(C\), rooted at
+an e-node belonging to \(C\).
+In particular, \(\mathsf{Extract}(I,\kappa)\)
+is a concrete realization of \(x_\star\) satisfying the root
+requirement \(\rho_\star\).
+\end{proposition}
+
+\begin{proof}
+The claim follows by induction over the acyclic composition graph.
+If \(\kappa(C)=n\)
+is atomic, then \(n\in C\) is itself a realization of the goal
+associated with \(C\).
+Otherwise, let \(\chi_I(n)=(C_1,\ldots,C_k)\).
+By induction, each \(\mathsf{Extract}_{\kappa}(C_i)\)
+is rooted at an e-node belonging to \(C_i\).
+The child-reference condition for the multe-graph therefore ensures
+that these child realizations form an admissible concrete composition
+with \(n\).
+Since \(n=\kappa(C)\in C\), the resulting realization is represented
+by \(C\).
+
+At the root, \(\kappa(C^\star_I)\in C^\star_I\),
+and every member of \(C^\star_I\) satisfies \(\rho_\star\).
+\end{proof}
+
+The proposition establishes only validity: an arbitrary
+canonicalization produces an arbitrary valid extraction.  To establish
+optimality, we must define an aggregate objective and show that local
+canonical choices compose into a globally optimal realization.  That is
+the role of compositional cost and Bellman compatibility.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Compositional Attributes and Optimization}
+\label{sec:optimization}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The preceding sections define valid extraction independently of any
+objective.  We now add attributes whose values depend compositionally
+on complete realizations.  Cost is the principal example.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Compositional Cost}
+\label{sec:compositional-cost}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Canonicalization selects an e-node for each surviving multe-class.
+To choose among those e-nodes by cost, we must assign a cost to each
+complete realization.
+
+We begin with the simplest familiar model: every e-node has a
+nonnegative local cost, and the cost of a realization is the sum of the
+local costs of its e-nodes.
+
+\begin{definition}[Local cost]
+A \emph{local cost function} is a function
+\(c:\mathsf N\to\mathbb R_{\geq 0}\)
+that assigns a nonnegative cost \(c(n)\) to every e-node \(n\).
+\end{definition}
+
+The local cost of a non-atomic e-node does not include the costs of its
+children.  Those costs are incorporated recursively.
+
+\begin{definition}[Cost of a realization]
+Let
+\[
+t=
+\left\langle
+n,t_1,\ldots,t_k
+\right\rangle
+\]
+be a complete realization rooted at an e-node \(n\).
+Its cost is
+\[
+\operatorname{cost}(t)
+=
+c(n)
++
+\sum_{i=1}^{k}\operatorname{cost}(t_i).
+\]
+
+For an atomic realization \(t=\langle n\rangle\),
+\(\operatorname{cost}(t)=c(n)\).
+\end{definition}
+
+Cost is therefore an aggregate property of the complete realization.
+It cannot generally be determined from the root e-node alone.
+
+A canonicalization determines one complete realization below every
+retained multe-class and therefore induces a cost for that class.
+
+Let \(\kappa(C)=n\),
+and suppose that the instantiated child references of \(n\) are
+\(\chi_I(n)=(C_1,\ldots,C_k)\).
+
+\begin{definition}[Cost induced by a canonicalization]
+The cost induced by \(\kappa\) at \(C\), written
+\(\operatorname{cost}_{\kappa}(C)\),
+is defined recursively by
+\[
+\operatorname{cost}_{\kappa}(C)
+=
+c(n)
++
+\sum_{i=1}^{k}
+\operatorname{cost}_{\kappa}(C_i),
+\qquad
+n=\kappa(C).
+\]
+
+If \(\kappa(C)\) is atomic, then
+\[
+\operatorname{cost}_{\kappa}(C)
+=
+c\bigl(\kappa(C)\bigr).
+\]
+\end{definition}
+
+Because the instantiated multe-graph is acyclic, this recursion is
+well-defined.  Equivalently,
+\[
+\operatorname{cost}_{\kappa}(C)
+=
+\operatorname{cost}
+\bigl(
+\mathsf{Extract}_{\kappa}(C)
+\bigr).
+\]
+
+\begin{example}[Cost of the running join]
+Suppose
+\[
+\kappa\bigl([R\Join S]_{\mathsf{any}}\bigr)
+=
+n_{\mathsf{hash}},
+\]
+and the hash-join e-node references
+\[
+[R]_{\mathsf{any}}
+\qquad\text{and}\qquad
+[S]_{\mathsf{any}}.
+\]
+
+Then
+\[
+\begin{split}
+\operatorname{cost}_{\kappa}
+\bigl([R\Join S]_{\mathsf{any}}\bigr)
+={}&
+c(n_{\mathsf{hash}})
+\\
+&+
+\operatorname{cost}_{\kappa}
+\bigl([R]_{\mathsf{any}}\bigr)
+\\
+&+
+\operatorname{cost}_{\kappa}
+\bigl([S]_{\mathsf{any}}\bigr).
+\end{split}
+\]
+
+Thus the cost of choosing the hash-join e-node depends on the
+canonical realizations chosen for its referenced child classes.
+\end{example}
+
+This additive model supports two distinct uses of cost.
+
+First, cost may appear in an aggregate requirement, such as
+\(\operatorname{cost}(t)\leq B\).
+Unlike the local requirements considered earlier, such a predicate
+depends on the recursively selected children and must be propagated
+through the cost equation.
+
+Second, cost may define a canonicalization policy that selects a
+minimum-cost realization from each surviving multe-class.
+
+We consider cost requirements and their propagation next.  More general
+aggregation functions, including non-additive and operator-specific
+ones, are deferred to Section~\ref{sec:generalizations}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Cost Requirements and Propagation}
+\label{sec:cost-requirements}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The requirements considered in
+Section~\ref{sec:requirement-predicates} are \emph{local}: whether an
+e-node satisfies them can be determined from the e-node itself.
+
+A cost requirement is different.  It applies to a complete realization,
+and its truth depends on the realizations selected for the children.
+It must therefore be propagated through the compositional cost
+equation.  Let \(\mathcal T_I(C)\) denote the set of complete
+realizations represented by a retained multe-class \(C\) in the
+instantiated graph \(\mathcal G\!\restriction_I\).
+
+\begin{definition}[Cost requirement]
+For a budget \(B\in\mathbb R_{\geq 0}\), the \emph{cost requirement}
+with budget \(B\) is the predicate
+\(\rho_B(t)\Leftrightarrow\operatorname{cost}(t)\leq B\) on complete
+realizations.  A \emph{budgeted demand} is a pair \((C,B)\)
+requiring a realization represented by \(C\) whose cost is at most
+\(B\).
+\end{definition}
+
+Suppose an e-node \(n\in C\) has child references
+\(\chi_I(n)=(C_1,\ldots,C_k)\).  A realization rooted at \(n\)
+satisfies budget \(B\) exactly when its children satisfy
+\[
+c(n)+\sum_{i=1}^{k}\operatorname{cost}(t_i)\leq B,
+\]
+so the parent budget leaves \(B-c(n)\) to be divided among the
+children.  In general, there is no unique such division.
+
+\begin{definition}[Budget allocation]
+For an e-node \(n\) of arity \(k\), the set of budget allocations
+admitted by a parent budget \(B\) is
+\[
+\mathsf{Alloc}_n(B)
+=
+\left\{
+(B_1,\ldots,B_k)\in\mathbb R_{\geq 0}^{k}
+\;\middle|\;
+c(n)+\sum_{i=1}^{k}B_i\leq B
+\right\}.
+\]
+\end{definition}
+
+An allocation \((B_1,\ldots,B_k)\in\mathsf{Alloc}_n(B)\) propagates
+the parent demand \((C,B)\) to the child demands
+\((C_1,B_1),\ldots,(C_k,B_k)\).  This propagation is relational: one
+parent demand may admit many different allocations among the
+children.
+
+\begin{example}[Allocating a join budget]
+Suppose a hash-join e-node has local cost
+\(c(n_{\mathsf{hash}})=20\) and the root budget is \(B=100\).  Its
+child budgets must satisfy \(B_R+B_S\leq 80\); possible allocations
+include \((30,50)\), \((40,40)\), and \((60,20)\).  The parent
+requirement does not determine one independent requirement for each
+child.  It determines a relation among their permitted budgets.
+\end{example}
+
+We can now define the exact propagation semantics.
+
+\begin{definition}[Satisfiable budgeted demand]
+A budgeted demand \((C,B)\) is \emph{satisfiable} if one of the
+following holds.
+
+\begin{enumerate}
+
+\item
+There is an atomic e-node \(n\in C\) with \(c(n)\leq B\).
+
+\item
+There is a non-atomic e-node \(n\in C\) with child references
+\(\chi_I(n)=(C_1,\ldots,C_k)\) and an allocation
+\((B_1,\ldots,B_k)\in\mathsf{Alloc}_n(B)\) such that every child
+demand \((C_i,B_i)\) is satisfiable.
+
+\end{enumerate}
+\end{definition}
+
+Because the instantiated multe-graph is acyclic, this recursive
+definition is well-founded.
+
+\begin{proposition}[Exactness of budget propagation]
+A budgeted demand \((C,B)\) is satisfiable if and only if there
+exists a realization \(t\in\mathcal T_I(C)\) with
+\(\operatorname{cost}(t)\leq B\).
+\end{proposition}
+
+\begin{proof}
+The proof is by induction over the acyclic composition graph.  For
+an atomic realization \(t=\langle n\rangle\), the claim follows from
+\(\operatorname{cost}(t)=c(n)\).  For a non-atomic realization
+\(t=\langle n,t_1,\ldots,t_k\rangle\), we have
+\(\operatorname{cost}(t)=c(n)+\sum_{i}\operatorname{cost}(t_i)\).
+If \(\operatorname{cost}(t)\leq B\), choose
+\(B_i=\operatorname{cost}(t_i)\); then
+\((B_1,\ldots,B_k)\in\mathsf{Alloc}_n(B)\), and each child demand is
+satisfiable by induction.  Conversely, given a valid allocation and
+satisfying child realizations, their aggregate cost is at most
+\(c(n)+\sum_{i}B_i\leq B\).
+\end{proof}
+
+Local requirement propagation restricts the original multe-graph by
+removing e-nodes and unreachable classes.  Cost propagation has a
+different shape: it lifts each demanded class \(C\) to a family of
+budget-indexed demands \((C,B)\).  Even for one parent e-node, exact
+propagation may generate many alternative child-budget allocations;
+the definition above supplies the semantics of those alternatives
+without prescribing an algorithm for enumerating them.
+Minimum-cost optimization provides a more direct characterization of
+which budgets are satisfiable, and lower bounds will later allow
+branch-and-bound algorithms to discard budget allocations and
+e-nodes that cannot improve upon an incumbent solution.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Minimum-Cost Canonicalization}
 \label{sec:scalar-optimization}
-
-Scalar cost will provide the simplest entailed
-canonicalization.
-
-\section{Pareto Lifting}
-\label{sec:pareto-lifting}
-
-Pareto optimization will be expressed by lifting the outcome
-domain to antichains of undominated alternatives.
-
-\section{Determination}
-\label{sec:determination}
-
-Determination will address the residual case in which semantic
-entailment leaves several incomparable outcomes.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Extraction}
-\label{chap:extraction}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Definition}
-\label{sec:extraction-definition}
+The preceding section defined the cost of every complete realization.
+We now use those costs to define a canonicalization policy.
 
-Extraction will be defined as requirement propagation followed by
-canonicalization.
+For a retained multe-class \(C\), let \(\mathcal T_I(C)\)
+denote the realizations represented by \(C\).
 
-\section{Bellman Compatibility}
+\begin{definition}[Optimal cost]
+The \emph{optimal cost} of \(C\) is
+\[
+\operatorname{opt}(C)
+=
+\min_{t\in\mathcal T_I(C)}
+\operatorname{cost}(t).
+\]
+\end{definition}
+
+Because the instantiated multe-graph is finite and acyclic,
+every retained multe-class represents finitely many realizations.
+The minimum therefore exists.
+
+A minimum-cost canonicalization chooses one realization attaining this
+minimum.
+
+\begin{definition}[Minimum-cost canonicalization]
+A canonicalization \(\kappa\)
+is \emph{minimum-cost} when, for every retained multe-class \(C\),
+\[
+\operatorname{cost}
+\bigl(
+\mathsf{Extract}_\kappa(C)
+\bigr)
+=
+\operatorname{opt}(C).
+\]
+\end{definition}
+
+Notice that this definition places no restriction on how \(\kappa\) is
+computed; it merely specifies the desired outcome.  Nor does it assume
+that optimal representatives may be chosen independently for different
+multe-classes---indeed, without additional assumptions, choosing the
+cheapest child representative need not produce the cheapest parent
+realization.
+
+The next subsection identifies the compatibility condition under which
+local canonicalization is globally correct: Bellman's Principle of
+Optimality.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Bellman Compatibility}
 \label{sec:bellman-compatibility}
-
-This section will state the conditions under which one
-canonical representative per surviving multe-class suffices.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Examples}
-\label{chap:examples}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Selinger-Style Query Optimization}
+The previous section defined minimum-cost canonicalization but did not
+justify computing optimum realizations one multe-class at a time.  In a
+general compositional optimization problem, such local reasoning is
+unsound: the globally optimal realization of a parent need not be
+assembled from locally optimal realizations of its children.  Dynamic
+programming succeeds only when the semantic representation and the
+optimization objective are compatible.
+
+\begin{definition}[Bellman compatibility]
+A compositional optimization problem is
+\emph{Bellman-compatible} if the following conditions hold.
+
+\begin{enumerate}
+
+\item
+\textbf{Semantic substitutability.}
+Each child reference denotes a multe-class whose members are
+semantically interchangeable in that position.
+
+\item
+\textbf{Independent composition.}
+If an e-node references child classes \((C_1,\ldots,C_k)\), then
+every tuple
+\((t_1,\ldots,t_k)\in C_1\times\cdots\times C_k\)
+is an admissible child configuration.  This is the Cartesian-fiber
+condition of Section~\ref{sec:multe-graph-definition}, lifted from
+e-nodes to the realizations they represent.
+
+\item
+\textbf{Monotone objective.}
+Replacing a child realization by another realization of the same
+multe-class whose cost is no greater cannot increase the cost of the
+parent realization.
+
+\end{enumerate}
+
+\end{definition}
+
+The first condition determines \emph{what} information is retained
+about each child realization; the second ensures that children interact
+only through that retained information; and the third ensures that
+improving one child cannot harm its parent.  Together these conditions
+imply the fundamental substitution property.
+
+\begin{lemma}[Substitution]
+Let an e-node reference child classes \((C_1,\ldots,C_k)\),
+and suppose \(t_i,t_i'\in C_i\) with
+\(\operatorname{cost}(t_i') \le \operatorname{cost}(t_i)\).
+Replacing \(t_i\) by \(t_i'\) preserves admissibility and cannot
+increase the parent's cost.
+\end{lemma}
+
+\begin{proof}
+The replacement remains admissible because every realization of
+\(C_i\) is interchangeable in that position and the children are
+otherwise independent.  The cost claim follows from monotonicity.
+\end{proof}
+
+The classical Bellman principle is an immediate consequence.
+
+\begin{theorem}[Bellman's Principle of Optimality]
+
+In a Bellman-compatible optimization problem, an optimal realization of
+every retained multe-class can be constructed from optimal realizations
+of its referenced child classes.
+
+Consequently, one optimal representative per retained multe-class
+suffices for global optimization.
+
+\end{theorem}
+
+\paragraph{Discussion.}
+
+Bellman's Principle is traditionally presented as a property of an
+optimization objective: an optimal solution is assembled from optimal
+solutions to subproblems.  The present development suggests a different
+interpretation, in which the principle is not primitive but follows
+from the interaction of a semantic representation and an objective.
+
+The semantic representation supplies two ingredients: the refinement
+hierarchy determines which distinctions among realizations are
+preserved, and the child references determine the interfaces through
+which subproblems interact.  The objective contributes only the
+requirement that improving a child through such an interface cannot
+worsen its parent.
+
+Viewed this way, dynamic programming is not fundamentally about
+recursion or memoization; it is optimization over semantic interfaces.
+Different dynamic programming algorithms differ primarily in how they
+choose those interfaces, and Bellman's Principle is the theorem that
+those interfaces are sufficient for independent optimization.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Bounds and Branch-and-Bound}
+\label{sec:bounds-pruning}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Minimum-cost canonicalization is defined in terms of the exact
+optimum cost \(\operatorname{opt}(C)\) of each retained multe-class.
+
+Computing these exact values may itself require substantial search.
+Branch-and-bound replaces exact optimization by a sound
+under-approximation during search.
+
+\begin{definition}[Lower bound]
+A \emph{lower bound} for a retained multe-class \(C\) is a value
+\(L(C)\) satisfying \(L(C)\le \operatorname{opt}(C)\).
+\end{definition}
+
+A lower bound need not equal the optimum.
+It represents information known before optimization has been completed.
+
+For additive cost, lower bounds compose naturally.
+
+\begin{definition}[Compositional lower bound]
+Suppose an e-node \(n\) references child multe-classes
+\((C_1,\ldots,C_k)\).  Its induced lower bound is
+
+\[
+L(n)
+=
+c(n)
++
+\sum_i
+L(C_i).
+\]
+\end{definition}
+
+Because every realization rooted at \(n\) contains \(n\) together
+with one realization from each child class, \(L(n)\) is itself a
+lower bound on every realization rooted at \(n\).
+
+Suppose a realization of the root has already been found whose cost
+is \(U\).  This incumbent provides an upper bound on the optimum.
+If \(L(n)\ge U\), then no realization rooted at \(n\) can improve
+upon the incumbent.  Such an e-node may therefore be discarded
+without affecting the final optimum.
+
+\begin{theorem}[Branch-and-bound soundness]
+
+Pruning every e-node whose lower bound cannot improve upon the current
+incumbent preserves the optimum root realization.
+
+\end{theorem}
+
+\paragraph{Discussion.}
+
+Branch-and-bound introduces a second monotone computation into the
+framework.  The semantic abstraction represented by multe-classes
+computes a monotone approximation to semantic information: distinctions
+may be forgotten, but never reintroduced.  Lower bounds compute a
+monotone approximation to optimization information; rather than
+attempting to compute the optimum cost directly, search accumulates
+progressively stronger lower bounds on that optimum.
+
+Each refinement establishes a stronger entailment
+\(L(C)\le \operatorname{opt}(C)\).
+The bound evolves monotonically until it either proves that a branch
+cannot improve the incumbent or converges to the optimum itself.
+Viewed this way, branch-and-bound is not merely an optimization
+technique but an instance of monotone knowledge accumulation.
+
+Semantic abstraction and lower-bound propagation therefore play
+analogous roles: one computes increasingly precise information about
+which realizations remain semantically distinguishable, the other about
+which realizations remain competitively optimal.  Both are monotone
+computations toward a fixed point.
+% Exact minimum costs need not be known before pruning begins.
+%
+% Define a lower bound L(C) satisfying
+%
+%     L(C) <= opt(C).
+%
+% For an e-node n with references C_1,...,C_k, define its induced
+% lower bound
+%
+%     L(n)
+%       =
+%     c(n) + sum_i L(C_i).
+%
+% Prove that L(n) is a lower bound on every realization rooted at n.
+%
+% Given an incumbent realization of cost U, n cannot improve the
+% incumbent whenever
+%
+%     L(n) >= U
+%
+% under the chosen strict/non-strict tie policy.
+%
+% Distinguish two correctness principles:
+%
+% - Bellman compatibility justifies replacing a child by its best
+%   representative;
+%
+% - bound soundness justifies discarding an alternative before its
+%   exact optimum is known.
+%
+% State branch-and-bound correctness:
+% pruning an e-node whose lower bound cannot beat the incumbent does
+% not change the minimum achievable root cost.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Examples}
+\label{sec:examples}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The preceding sections introduced semantic schemas, multe-graphs,
+requirements, canonicalization, and Bellman compatibility in the
+abstract.  We now instantiate this framework in two familiar settings.
+The first example shows that the framework recovers Selinger's
+classical dynamic-programming optimizer; the second shows that it
+strictly generalizes ordinary equality saturation by allowing several
+semantic interfaces for the same equivalence class.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Recovering Selinger's Optimizer}
 \label{sec:selinger-example}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-The first example will recover interesting orders as surviving
-multe-class distinctions induced by a query instance.
+Consider optimization of a relational query.  Its semantic schema is
+immediate.
 
-\section{Equality Saturation}
+\begin{center}
+\begin{tabular}{ll}
+Goal & logical relational expression \\
+E-node & physical operator implementation \\
+Composition & physical operator tree \\
+\end{tabular}
+\end{center}
+
+A physical operator does not reference particular child plans; instead
+it specifies the semantic properties required of its inputs.  A merge
+join, for example, references child multe-classes providing compatible
+sort orders, whereas a hash join references only unordered input
+classes.  The refinement hierarchy records exactly the semantic
+distinctions needed by these physical operators---in the classical
+Selinger optimizer, the interesting orders.
+
+A query becomes a problem instance by imposing requirements on the
+root multe-class.
+For example,
+
+\[
+\texttt{SELECT * FROM R JOIN S}
+\]
+
+requires any realization of the root goal, whereas
+
+\[
+\texttt{SELECT * FROM R JOIN S ORDER BY R.a}
+\]
+
+requires a root realization belonging to the
+\([R\Join S]_{\mathsf{sorted}(a)}\)
+multe-class.  Instantiation propagates this requirement downward
+through the multe-graph, and only multe-classes that may contribute to
+a satisfying realization remain live.
+
+Canonicalization then chooses one representative for each surviving
+multe-class.  Using additive plan cost and minimum-cost
+canonicalization yields the lowest-cost implementation satisfying the
+required semantic properties.
+
+Bellman compatibility follows immediately.  The child references define
+independent subproblems indexed by their required semantic interfaces,
+and operator cost is monotone in child costs, so one minimum-cost
+representative per surviving multe-class suffices.  The instantiated
+multe-graph is therefore precisely the memoization structure maintained
+by Selinger's dynamic programming algorithm.
+
+Viewed in this way, interesting orders are not an auxiliary heuristic;
+they are the semantic interfaces through which parent operators observe
+their children.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Generalizing Equality Saturation}
 \label{sec:egraphs-example}
-
-The second example will relate ordinary e-classes, nested
-multe-classes, and extraction.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Theorem Roadmap}
-\label{chap:theory}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{Propagation}
-\label{sec:propagation-theory}
+Equality saturation begins from a different semantic representation.
+Each e-class represents all expressions known to be equivalent under
+the rewrite system, and extraction chooses one representative
+expression, typically by minimum cost.
 
-We will seek existence, uniqueness, and traversal independence
-of the propagated fixed point.
+In our terminology, an ordinary e-graph associates one semantic
+quotient with each goal.  Every equivalent expression belongs to the
+same e-class, every parent references that same class, and the semantic
+interface is therefore fixed.
 
-\section{Minimality}
-\label{sec:minimality-theory}
+A multe-graph relaxes this restriction.  Instead of one semantic
+interface, each goal may possess a hierarchy of semantic interfaces
+represented by nested multe-classes, so different parent e-nodes may
+observe different semantic distinctions among equivalent expressions.
+One parent may distinguish expressions according to whether they
+produce sorted output, for example, while another ignores output order
+entirely; both observations concern the same logical result but require
+different semantic interfaces.
 
-We will ask whether the instantiated multe-graph is the unique
-coarsest quotient preserving every required observation.
+Extraction proceeds exactly as before.  Requirements first instantiate
+the multe-graph by removing inadmissible alternatives and unreachable
+semantic distinctions, and canonicalization then chooses one
+representative for each surviving multe-class.  Ordinary e-graph
+extraction is recovered as the special case in which every goal
+possesses only a single represented semantic quotient.
 
-\section{Extraction Soundness}
-\label{sec:extraction-soundness}
+Multe-graphs therefore strictly generalize ordinary e-graphs,
+preserving the fundamental equality-saturation model while allowing
+multiple semantic interfaces to coexist for the same logical
+equivalence class.
 
-We will compare extraction over the instantiated graph with
-extraction over the fully expanded semantic relation.
+\paragraph{Discussion.}
+
+The two examples illustrate complementary viewpoints.  Selinger's
+optimizer begins with several semantic interfaces and builds a dynamic
+program over them, whereas equality saturation begins with a single
+semantic interface.
+
+A multe-graph unifies these perspectives.  The refinement hierarchy
+determines which semantic distinctions are represented, and the child
+references determine the interfaces through which subproblems interact.
+Bellman compatibility then guarantees that these interfaces are
+sufficient for local optimization to compose into a globally optimal
+solution.
+
+From this perspective, dynamic programming is optimization over
+semantic interfaces, and different optimization algorithms differ
+primarily in how they choose those interfaces.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\chapter{Generalizations}
-\label{chap:generalizations}
+\section{Theory}
+\label{sec:theory}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-We will relax tree-shaped quotient hierarchies, root-only
-requirements, acyclicity, Boolean requirement domains, and
-uniform canonicalization policies.
+The preceding development separated compositional optimization into
+five layers:
+
+\begin{enumerate}
+
+\item
+semantic representation;
+
+\item
+problem instantiation;
+
+\item
+canonicalization;
+
+\item
+optimization; and
+
+\item
+search.
+
+\end{enumerate}
+
+This decomposition was introduced for conceptual clarity; the purpose
+of the present section is to justify it mathematically.  Rather than
+treating dynamic programming as a primitive algorithmic principle, we
+derive it from properties of the underlying semantic representation.
+
+The resulting theory has three themes.  First, we show that
+multe-graphs faithfully represent the optimization problem.  Second, we
+show that Bellman's Principle is a theorem about semantic interfaces
+rather than an independent assumption.  Finally, we show that semantic
+representation, optimization, and search have distinct correctness
+obligations and therefore admit independent generalization.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Representation}
+\label{sec:representation-theory}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The first question is whether a multe-graph faithfully represents the
+underlying optimization problem.  Instantiation specializes a semantic
+schema to one problem instance by propagating requirements and removing
+semantic distinctions that become unobservable; this transformation
+should preserve exactly the realizations satisfying the specified
+requirements.
+
+\begin{theorem}[Representation correctness]
+Extraction from the instantiated multe-graph is equivalent to
+extraction from the original semantic schema restricted to realizations
+satisfying the problem requirements.
+\end{theorem}
+
+Correctness alone is not sufficient.  Instantiation should also avoid
+preserving distinctions that no satisfying realization can observe.
+
+\begin{theorem}[Minimality]
+Within the represented refinement hierarchy, the instantiated
+multe-graph is the coarsest semantic quotient preserving every
+distinction observable from the demanded root.
+\end{theorem}
+
+Together, these theorems justify the instantiated multe-graph as the
+semantic representation of the optimization problem.
+
+\begin{remark}[Future direction: minimal semantic interfaces]
+The preceding theorem is global: it identifies the coarsest surviving
+representation for an entire problem instance.  A complementary local
+result appears possible.  Each child reference of a parent e-node is
+intended to represent the coarsest semantic abstraction through which
+that parent can correctly compose with its child.  Formalizing this
+minimal-interface property would characterize multe-graphs as minimal
+both globally---in the interfaces retained after instantiation---and
+locally---in the information carried by each remaining interface.
+\end{remark}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Optimization}
+\label{sec:optimization-theory}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Having established the semantic representation, we next ask when local
+optimization is sufficient.  The key observation is that a parent
+interacts with each child only through the referenced semantic
+interface.  The semantic question is therefore whether replacing one
+realization by another from the same referenced multe-class preserves
+composition, while the optimization question is whether such a
+replacement can worsen the objective.  These are independent concerns.
+
+\begin{lemma}[Semantic substitution]
+Replacing a child realization by another realization belonging to the
+same referenced multe-class preserves semantic admissibility.
+\end{lemma}
+
+Semantic substitution is a property of the multe-graph alone,
+independent of costs, objectives, and search.  Optimization enters only
+through Bellman compatibility.
+
+\begin{theorem}[Bellman's Principle]
+Suppose
+
+\begin{enumerate}
+
+\item
+referenced multe-classes are semantically substitutable;
+
+\item
+child subproblems are compositionally independent (the
+Cartesian-fiber condition); and
+
+\item
+the optimization objective is monotone under semantic substitution.
+
+\end{enumerate}
+
+Then every optimal realization is assembled from optimal realizations
+of its referenced child multe-classes.
+
+Consequently, one optimal representative per retained multe-class
+suffices for global optimization.
+\end{theorem}
+
+Bellman's Principle is therefore not assumed.  It follows from the
+interaction between semantic interfaces and the optimization objective.
+
+Branch-and-bound exploits the same interfaces in a different way.
+Rather than computing optimum values directly, it accumulates monotone
+lower bounds on those values.
+
+\begin{theorem}[Branch-and-bound soundness]
+Pruning an e-node whose lower bound cannot improve upon the current
+incumbent preserves the optimum realization.
+\end{theorem}
+
+Unlike Bellman's Principle, this theorem depends only upon the
+soundness of the lower bounds.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Modularity}
+\label{sec:modularity-theory}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The preceding results reveal that the framework separates several
+independent correctness obligations.
+
+\begin{center}
+\begin{tabular}{ll}
+Representation &
+semantic interfaces preserve observable behavior
+\\[1ex]
+
+Instantiation &
+requirements preserve satisfying realizations
+\\[1ex]
+
+Canonicalization &
+one representative is selected per surviving interface
+\\[1ex]
+
+Optimization &
+preferences compose across semantic interfaces
+\\[1ex]
+
+Search &
+algorithms preserve the optimum
+\end{tabular}
+\end{center}
+
+No theorem requires these layers to be developed simultaneously.
+Changing the optimization objective does not alter semantic
+correctness; changing the search algorithm does not alter Bellman
+compatibility; and changing the refinement hierarchy changes the
+represented semantic interfaces but not the meaning of
+canonicalization.  Each layer therefore admits independent refinement.
+
+\paragraph{Discussion.}
+
+Traditional presentations of dynamic programming intertwine semantic
+representation, optimization, and search.  The present development
+separates these concerns: semantic interfaces determine what
+information must flow between subproblems, optimization determines which
+representatives of those interfaces are preferred, and search determines
+how those preferences are computed.
+
+Bellman's Principle is therefore not the foundation of compositional
+optimization; rather, it is the theorem that semantic interfaces are
+sufficient for independent optimization.  Viewed this way, dynamic
+programming is optimization over semantic interfaces.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Generalizations}
+\label{sec:generalizations}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The preceding development deliberately adopted the simplest setting in
+which the central ideas can be stated clearly, assuming tree-shaped
+refinement hierarchies, root requirements, Boolean local predicates,
+additive scalar cost, and finite acyclic multe-graphs.  None of these
+assumptions is fundamental.  Once semantic representation,
+instantiation, canonicalization, optimization, and search have been
+separated, each may be generalized independently.  This section
+sketches several directions.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Beyond Tree Hierarchies}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Throughout this document, refinement hierarchies were represented as
+trees.  This assumption simplifies presentation but is not essential.
+More generally, a goal may admit many compatible semantic quotients
+whose refinement order forms an arbitrary finite meet-semilattice or
+partial order rather than a tree, so that different optimization
+objectives may induce different quotient decompositions over the same
+semantic space.
+
+The local definitions of multe-classes and child references remain
+unchanged; only the organization of the refinement hierarchy changes.
+The representation and minimality theorems should therefore extend to
+arbitrary compatible quotient families.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Beyond Root Requirements}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The presentation treated problem requirements as originating at the
+root, but in practice requirements naturally arise throughout the
+graph.  Examples include
+
+\begin{itemize}
+
+\item memory budgets for individual operators,
+
+\item physical constraints on particular subplans,
+
+\item user hints,
+
+\item cached intermediate results,
+
+\item preferred rewrite strategies.
+
+\end{itemize}
+
+The semantic framework already accommodates this generalization.  A
+requirement is simply a predicate registered with a multe-class or
+Local predicates depend only upon the intrinsic properties of one
+e-node.  Many practically important requirements instead constrain
+aggregate properties of complete realizations.  Examples include
+Local predicates depend only upon the intrinsic properties of one
+e-node.
+
+Many practically important requirements instead constrain aggregate
+properties of complete realizations.
+
+Examples include
+
+\begin{itemize}
+
+\item total execution cost,
+
+\item peak memory consumption,
+
+\item latency,
+
+\item energy usage.
+
+\end{itemize}
+
+Unlike local predicates, aggregate requirements propagate through the
+composition equations defining the corresponding attribute, and exact
+propagation generally produces relations among child demands rather
+than independent child requirements.  Approximate propagation, lower
+The running development specialized optimization to additive scalar
+cost, but the essential property used by Bellman's Principle is weaker.
+Each e-node may instead define an operator-specific aggregation
+function \(F_n:A^k\rightarrow A\)
+over an arbitrary attribute domain \(A\).  Bellman compatibility then
+becomes a property of these aggregation functions rather than of
+addition itself, with monotonicity under semantic substitution
+replacing additivity as the fundamental optimization requirement.
+Uniform algebraic structures such as semirings and dioids provide
+important special cases, but are not required by the semantic
+framework.rather than of addition itself.
+
+Monotonicity under semantic substitution replaces additivity as the
+fundamental optimization requirement.
+
+Uniform algebraic structures such as semirings and dioids provide
+important special cases, but are not required by the semantic
+framework.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Beyond Acyclicity}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Finite acyclic multe-graphs permit inductive definitions of
+realizability, instantiation, and extraction.  Recursive optimization
+problems instead require cyclic semantic schemas, and the inductive
+definitions then become least-fixed-point definitions, with requirement
+propagation, optimization, and lower-bound refinement all becoming
+monotone operators over suitable lattices.  The present framework
+therefore extends naturally toward recursive queries, recursive rewrite
+systems, and general fixed-point semantics.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Beyond Scalar Optimization}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Scalar optimization assumes that every realization receives a value in
+a totally ordered domain, yet many optimization problems are inherently
+multi-objective.  Rather than selecting a single scalar optimum,
+canonicalization may operate over a lifted outcome domain whose elements
+are Pareto frontiers, with the frontier itself serving as one canonical
+outcome in that domain.  Pareto optimization thus changes the outcome
+space rather than the definition of canonicalization, and Bellman
+compatibility again becomes a question about monotonicity in the lifted
+domain.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Beyond Optimization}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The preceding sections implicitly assumed that canonicalization is
+entailed by the optimization objective.  Scalar optimization chooses a
+unique optimum, and Pareto optimization a unique Pareto frontier in a
+lifted domain; in both cases the canonical outcome is determined by
+semantic entailment.
+
+Optimization is therefore only one canonicalization discipline.  More
+generally, a semantic interface may admit several incomparable canonical
+outcomes even after every available optimization criterion has been
+applied.  Choosing among those outcomes is no longer optimization but a
+semantic commitment.
+
+This observation motivates Determination Theory.  The semantic
+representation developed in the present document is independent of the
+canonicalization policy applied to it, of which optimization is only
+one.  Determination studies the cases in which semantic entailment alone
+is insufficient to select a unique representative.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Payoffs}
+\label{sec:payoffs}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The development above is deliberately spare: it fixes a vocabulary
+and separates concerns.  This final section collects the results
+that the framework exists to support.  \emph{In an article prepared
+for submission, the material of this section would be the prominent
+results}; the preceding sections would be compressed into the
+definitions needed to state them.  We record each payoff here at
+internal-note fidelity, marking claims as theorems, conjectures, or
+open problems according to our current confidence.
+
+The intended spine of the outbound article is:
+
+\begin{enumerate}
+\item \emph{semantic interfaces} --- the framework of the preceding
+      sections;
+\item \emph{their derivation} --- continuation equivalence and a
+      Myhill--Nerode theorem for dynamic programming
+      (Section~\ref{sec:continuation}); and
+\item \emph{their price} --- width and dimension as intrinsic
+      complexity measures of compositional optimization problems
+      (Section~\ref{sec:width});
+\end{enumerate}
+
+with demand transformation (Section~\ref{sec:demand}), local search
+(Section~\ref{sec:terrain}), and rewriting-system completion
+(Section~\ref{sec:completion}) as applications.  A closing
+dictionary (Section~\ref{sec:types}) translates the framework into
+the vocabulary of programming languages, where several of our
+central notions carry standard names.
+
+Throughout, one sentence serves as motif:
+
+\begin{quote}
+\emph{A semantic interface is exactly the information about a
+subproblem that every future composition may need.}
+\end{quote}
+
+Everything in this document---Selinger, Bellman, e-graphs,
+branch-and-bound, demand propagation, local search, and the
+determination boundary---is a consequence of that one idea.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Deriving Semantic Interfaces}
+\label{sec:continuation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The preceding development takes the refinement hierarchies as given:
+multe-classes are supplied with the schema, and the theorems of
+Section~\ref{sec:theory} assume them.  The deepest question the
+framework raises is where they come from.  This subsection derives
+them.  In the submission version we expect the results sketched
+here---a Myhill--Nerode theorem for dynamic programming---to be the
+central theoretical contribution.
+
+The role of ``the future of a realization'' is played by
+\emph{contexts}: realizations of the root goal with a hole into
+which a realization of $x$ may be plugged.  For each goal $x$, let
+$\mathcal T(x)$ denote the set of complete concrete realizations of
+$x$ (Section~\ref{sec:extraction}).
+
+\begin{definition}[Context]
+Let $x\in X$ be a goal.  A \emph{context} for $x$ is a complete
+realization of the root goal $x_\star$ with a single hole of sort
+$x$: formally, an element of $\mathcal T(x_\star)$ in the schema
+extended with a fresh atomic e-node
+$[\,\cdot\,]_x\in\mathsf N(x)$ that is used exactly once.
+Write $\mathsf{Ctx}(x)$ for the set of contexts for $x$, and $C[t]$
+for the term obtained by plugging $t\in\mathcal T(x)$ into the hole.
+\end{definition}
+
+\begin{definition}[Acceptance]
+A context $C\in\mathsf{Ctx}(x)$ \emph{accepts} $t\in\mathcal T(x)$
+when $C[t]$ is an admissible realization of $x_\star$: every
+composition step of $C[t]$ lies in its composition relation.
+When a problem instance is fixed, we additionally require that the
+root e-node of $C[t]$ satisfy the root requirement $\rho_\star$.
+\end{definition}
+
+\begin{definition}[Continuation equivalence]
+\label{def:continuation}
+For $s,t\in\mathcal T(x)$, define $s\equiv_x t$ when
+
+\begin{enumerate}
+\item every context accepts $s$ exactly when it accepts $t$; and
+\item for every accepting context $C$,
+\[
+\operatorname{cost}(C[s])-\operatorname{cost}(s)
+=
+\operatorname{cost}(C[t])-\operatorname{cost}(t).
+\]
+\end{enumerate}
+
+The quotient
+\[
+K_x=\mathcal T(x)/{\equiv_x}
+\]
+is the \emph{continuation quotient} at $x$.
+\end{definition}
+
+Two realizations are continuation-equivalent when swapping one for
+the other inside any complete realization changes nothing that the
+rest of the realization can observe: no context can tell them apart,
+so \emph{no optimizer ever needs to distinguish them}.  Readers who
+recall automata theory will recognize a Myhill--Nerode construction:
+it quotients realizations by their future behavior, just as
+Myhill--Nerode quotients string prefixes by their acceptance
+futures.
+
+\begin{remark}[Additive collapse]
+Under the additive cost model of
+Section~\ref{sec:compositional-cost}, the incremental-cost condition
+is vacuous: $\operatorname{cost}(C[s])-\operatorname{cost}(s)$ is
+the sum of the local costs of the e-nodes of $C$ itself, independent
+of $s$.  Continuation equivalence is then a purely semantic
+relation---two realizations are equivalent exactly when the same
+contexts accept them---and cost enters only through dominance among
+inequivalent classes.  This matches practice: interesting orders are
+semantic properties, not costs.  Under the general aggregation
+functions of Section~\ref{sec:generalizations}, the cost condition
+has content: a realization may be accepted everywhere yet contribute
+differently to different parents.
+\end{remark}
+
+Continuation equivalence gives a yardstick for hierarchies.
+
+\begin{definition}[Sufficient and exact hierarchies]
+A refinement hierarchy for a goal $x$ is \emph{Bellman-sufficient}
+when any two realizations represented by the same leaf multe-class
+are continuation-equivalent, and \emph{exact} when, in addition, two
+realizations are represented by the same leaf class if and only if
+they are continuation-equivalent.
+\end{definition}
+
+Selinger's interesting orders~\cite{selinger1979access} are a
+Bellman-sufficient hierarchy for the System~R cost model; whether
+they are exact depends on the operator inventory.
+
+\begin{conjecture}[Minimality]
+\label{conj:minimality}
+The continuation quotient is the coarsest Bellman-sufficient
+interface: every Bellman-sufficient hierarchy refines $K_x$, the
+factoring is unique, and the family of quotient maps commutes with
+child references and with instantiation.  Consequently, every
+Bellman-compatible multe-graph factors through the continuation
+quotients, which are initial among Bellman-valid semantic
+representations.
+\end{conjecture}
+
+The Minimality theorem of Section~\ref{sec:representation-theory} is
+the instance-level shadow of this conjecture: instantiation discards
+exactly the distinctions that no accepting context of the instance
+can observe, which is coarsening toward the instance-relative
+continuation quotient.  The conjecture strengthens that statement
+from the represented hierarchy to all hierarchies.
+
+\begin{conjecture}[Universality]
+\label{conj:universality}
+Let a concrete semantic schema with costs be given, with no
+refinement hierarchy.  Then the continuation quotients themselves
+support a multe-graph: composition descends to the quotients, the
+descended fibers admit Cartesian presentations (after the usual
+splitting of e-nodes), and the induced objective is monotone under
+substitution within classes.  Consequently, a compositional
+optimization problem admits an exact interface-indexed dynamic
+program if and only if its continuation quotients are uniformly
+small.
+\end{conjecture}
+
+\begin{remark}[A Myhill--Nerode theorem for dynamic programming]
+Together, Conjectures~\ref{conj:minimality}
+and~\ref{conj:universality} assert: \emph{Bellman's principle holds
+exactly when future distinguishability has a finite compositional
+representation, and the continuation quotient is its minimal
+automaton.}  Selinger's interesting orders, Cascades' property
+requests~\cite{graefe1995cascades}, and e-graph extraction
+frontiers~\cite{willsey2021egg} become different coordinate systems
+on the same canonical object; interesting orders, in particular, are
+the Nerode classes of physical plans.  This is the strongest sense
+in which the multe-graph is derived rather than designed.
+\end{remark}
+
+\begin{remark}[Two presentations of factorization]
+\label{rem:presentations}
+The Bellman condition has two equivalent presentations, and the
+universality proof should fix one and prove the equivalence once.
+The \emph{relational} presentation is the one used in this document:
+composition relations with the Cartesian-fiber condition of
+Section~\ref{sec:multe-graph-definition}, where a fiber that is not
+one product is split across several e-nodes.  The \emph{functional}
+presentation labels each realization with its interface and equips
+each operator with a property-transfer map computing the parent
+label from the child labels; partial operators are accommodated by
+splitting them per admissible combination of child labels.  The two
+splittings are the same maneuver.  The relational form is more
+general in appearance; the functional form makes the congruence
+argument cleaner.
+\end{remark}
+
+\begin{remark}[Deferred commitment is a free completion]
+\label{rem:free}
+The Pareto lift of Section~\ref{sec:generalizations} and the
+frontier-shaped memo structures of practical optimizers share a
+canonicity property worth recording, because it shows they are
+forced rather than chosen.  Let $(O,\preceq)$ be a finite poset of
+properties.  The domain of joint demands is $\mathsf{Down}(O)$, the
+finite downsets of $O$ ordered by inclusion, and this is the
+\emph{free} join-semilattice with bottom on $O$: every monotone map
+from $O$ into a join-semilattice extends uniquely to a
+join-preserving map on $\mathsf{Down}(O)$.  The completion therefore
+adds exactly one capability to the property domain---holding several
+incomparable alternatives open at once---and nothing else.  Any
+smaller summary must conflate alternatives that some composition
+treats differently.  In particular, collapsing all incomparable sets
+to a single formal ``undetermined'' element identifies $\{a,b\}$,
+$\{a,c\}$, and $\{a,b,c\}$, so transfer maps can no longer act
+differently on them and factorization fails for any operator that
+consumes one alternative but not another.  The downset completion is
+the least completion compatible with deferred commitment.
+\end{remark}
+
+\TODO{Nested antichains (``ears on ears'').  In a join-semilattice,
+nested joins flatten: $a\sqcup(b\sqcup c)=a\sqcup b\sqcup c$, so
+nested antichains such as $\{\{c,d\},b\}$ denote nothing beyond
+their flattening $\{b,c,d\}$ in a demand domain.  Earlier discussion
+suggested that nesting records the dependency structure among future
+commitments (staged or conditional choices), which---if it must be
+retained---belongs in the composition structure or in a finer
+multe-class tree rather than in the demand domain.  Decide: is the
+flat completion always enough, with staging carried by the goals and
+composition relations, or do we need an explicit AND/OR term algebra
+over joins and compositions?  This may also require a fix in the
+determination papers.  Resolve before the universality proof
+attempt.}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{The Price of Bellman: Width and Dimension}
+\label{sec:width}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This subsection is the second intended headline of the outbound
+article.  Its premise converts the framework from a qualitative
+condition into a quantitative theory: Bellman's principle is never
+unavailable, only expensive, and the expense is an intrinsic
+complexity measure of the problem.
+
+The claim of availability is not a conjecture; it is a nearly
+trivial proposition, and its triviality is the point.
+
+\begin{proposition}[Sufficiency is always achievable]
+\label{prop:trivial}
+Every concrete semantic schema with costs admits a
+Bellman-compatible multe-graph presentation.
+\end{proposition}
+
+\begin{proof}[Proof sketch]
+Take the discrete presentation: unfold the schema until every
+realization is represented by its own chain of e-nodes, and let
+every multe-class be a singleton.  Each composition fiber is then a
+union of $1\times\cdots\times 1$ products, one e-node per tuple, so
+the Cartesian-fiber condition holds trivially; substitution within a
+singleton class is the identity, so monotonicity is vacuous.
+\end{proof}
+
+This lift is useless in practice: the representation is as large as
+the solution space itself.  Its lesson stands nonetheless.
+Sufficiency is automatic, so the substantive question is
+quantitative: \emph{how much must be retained?}  The continuation
+quotient supplies the yardstick.
+
+\begin{remark}[Choosing the decomposition]
+One honest hedge applies to everything that follows: the framework
+takes the decomposition---the goals and composition signatures---as
+given, and a full theory of choosing good decompositions remains
+open.  The hedge is only partial.  Completion as preprocessing
+(Section~\ref{sec:completion}) rewrites a given decomposition into
+one that is as monotone as the objective allows: the orientable
+portion is discharged by normalization, and multe-class structure is
+confined to the residue where the order genuinely cannot decide.
+\end{remark}
+
+\begin{definition}[Bellman width]
+\label{def:width}
+The \emph{width} of a goal $x$ is $w(x)=|K_x|$, the number of
+continuation classes at $x$.  The width of a problem is
+$\max_{x\in X}w(x)$.
+\end{definition}
+
+\begin{definition}[Bellman dimension]
+\label{def:dimension}
+A \emph{property vocabulary} is a finite poset $(O,\preceq)$
+together with a labeling assigning each realization the downset of
+properties it provides, such that labels factor through composition
+in the sense of the functional presentation
+(Remark~\ref{rem:presentations}).  The \emph{dimension} of a problem
+is the least $|O|$ over vocabularies whose labeling is
+Bellman-sufficient (equal labels imply continuation equivalence);
+the \emph{Boolean dimension} restricts to discretely ordered $O$.
+\end{definition}
+
+\begin{proposition}[Basic bounds; proofs to be recorded]
+\label{prop:bounds}
+\begin{enumerate}
+\item Every Bellman-sufficient hierarchy at $x$ has at least $w(x)$
+  leaf classes; hence $w(x)$ lower-bounds the size of every exact
+  memo structure at $x$.
+\item Boolean labels at $x$ are subsets of the properties relevant
+  at $x$, so the Boolean dimension is at least
+  $\max_x\lceil\log_2 w(x)\rceil$.
+\item Extraction runs in time proportional to
+  $\sum_{n}\prod_{i} f(C_i)$ over non-atomic e-nodes $n$ with child
+  references $(C_1,\ldots,C_k)$, where $f(C_i)$ is the size of the
+  retained frontier at $C_i$.
+\end{enumerate}
+Consequently, dynamic programming is efficient exactly when widths
+are small: polynomial width gives polynomial memo structures, and
+exponential width forbids them.
+\end{proposition}
+
+\begin{example}[Held--Karp width]
+\label{ex:heldkarp}
+The traveling salesperson problem fits the framework with goals
+``simple paths from a fixed start visiting exactly $k$ cities,''
+e-nodes extending a path by one city, and complete tours as the root
+goal.  For generic edge weights, two partial paths are
+continuation-equivalent if and only if they visit the same city set
+and end at the same city, so
+\[
+w(x_k)=\binom{n}{k}\,k :
+\]
+the width is exponential in $n$.  The Held--Karp dynamic
+program~\cite{heldkarp1962} memoizes exactly these classes, so it is
+the canonical lift---and its $2^n$ table is not an artifact of a
+weak state choice but the price the problem demands, at least among
+interface-indexed dynamic programs.  Selinger's problem, by
+contrast, has width bounded by the number of realizable order
+bundles, which is small for typical queries.  Characterizing which
+problems have polynomial width is, we believe, the right abstract
+form of the question ``when does dynamic programming work?''
+\end{example}
+
+\begin{remark}[Rectangle covers and communication complexity]
+\label{rem:rectangles}
+The relational presentation supplies a second size measure and,
+with it, lower-bound technology.  A non-atomic e-node presents one
+Cartesian product of child classes, so a concrete composition fiber
+must be covered by such products: the minimum number of e-nodes
+presenting a fiber is its \emph{rectangle-cover number} with respect
+to the child quotients---in other words, a nondeterministic
+communication complexity.  Width counts classes per goal; covers
+count e-nodes per composition.  Communication-complexity lower
+bounds should therefore transfer directly to multe-graph size,
+giving problems for which \emph{any} Bellman-compatible
+representation is provably large.  We regard this as the most
+promising route to lower bounds for the open problems below.
+\end{remark}
+
+\begin{openproblem}[Compositionality gap]
+\label{open:gap}
+The bound of Proposition~\ref{prop:bounds}(2) is
+information-theoretic: $\lceil\log_2 w\rceil$ properties suffice to
+\emph{name} the continuation classes, but a vocabulary must also
+factor through every composition, which may force more properties.
+Determine how large the gap between the compositional dimension and
+$\lceil\log_2 w\rceil$ can be, and identify structural conditions
+under which the information-theoretic bound is achieved.
+\end{openproblem}
+
+\begin{openproblem}[Small-width problems]
+\label{open:width}
+Characterize the compositional problems of polynomial width.  Such a
+characterization would delimit, in one vocabulary, the problems for
+which Selinger-style dynamic programming, Cascades-style
+memoization, and frontier-indexed e-graph extraction can be
+efficient.
+\end{openproblem}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Demand Transformation}
+\label{sec:demand}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This subsection and the next are payoffs of a different kind: in the
+outbound article they would form the applications section, showing
+that semantic interfaces organize search architectures as well as
+correctness.  The observation here is that \emph{instantiation is
+demand propagation}, and demand propagation has a classical theory.
+
+Recall the two-directional propagation of
+Section~\ref{sec:propagation}: liveness propagates demands downward
+from the accepted root e-nodes, realizability computes supply upward
+from the atomic e-nodes, and the instantiated multe-graph is their
+intersection.  In deductive databases this construction has a name.
+Magic-sets rewriting~\cite{bancilhon1986magic} and its refinement,
+demand transformation with subsumptive
+tabling~\cite{tekle2011subsumptive}, specialize a bottom-up program
+so that it computes only facts demanded by a calling context.
+There, an \emph{adornment} pairs a predicate with a demand
+descriptor exactly as an instantiated demand pairs a multe-class
+with a requirement.  One notable difference: magic sets specializes
+on \emph{values} (which tuples) to prune irrelevant computation,
+while we specialize on \emph{semantic properties} (how outputs are
+shaped) to restore Bellman's principle---the same rewrite, deployed
+for relevance in one case and sufficiency in the other.
+
+We see three uses for the correspondence.
+
+First, it derives the demands.  Define the \emph{demand closure} as
+the least set of (class, requirement) pairs containing the root
+demand and closed downward through the child references of the
+e-nodes surviving each demand.  Restricting extraction to the
+closure should preserve the root value, and the union of demands
+registered at each goal is a candidate constructive answer to which
+distinctions matter there---an input to the universality proof
+(Conjecture~\ref{conj:universality}).
+
+Second, it names a duality we have circled repeatedly:
+\emph{Cascades is the magic-sets rewriting of Selinger}.  Top-down
+optimizers propagate required physical properties from parent to
+child with memoization; that is demand-transformed evaluation of the
+bottom-up recurrence.  The slogan is implicit in prior work: the
+Evita Raced metacompiler~\cite{condie2008evita} implemented both a
+Selinger-style bottom-up optimizer and a Cascades-style top-down
+optimizer as Overlog programs over a single declarative runtime.
+What was there an engineering observation---the two optimizers are
+small variations of one declarative program---becomes here a theorem
+target: the top-down architecture should be \emph{derivable} from
+the bottom-up one by a demand rewrite with a classical correctness
+proof pattern.
+
+Third, it explains an optimization.  Answering a demand from a
+stronger cached supply is subsumption, and the result that
+subsumptive tabling beats magic sets~\cite{tekle2011subsumptive}
+maps onto our satisfaction relation: dominance-aware memoization is
+exactly the optimization their analysis rewards.
+
+\begin{remark}[Demand can overshoot supply]
+The demand closure ranges over all child demands admitted by the
+composition structure and may therefore demand classes whose
+realizable restriction is empty.  The practically right object is
+the intersection of demand, computed top-down, with realized supply,
+computed bottom-up---which is exactly what instantiation already
+computes, and what a Cascades-style memo achieves operationally.
+Any minimality claim about derived demands must be stated relative
+to this intersection, not to demand alone.
+\end{remark}
+
+\begin{openproblem}[Demand transformation of extraction]
+\label{open:demand}
+Formalize the demand closure, prove that restriction to it preserves
+the root value, show that the induced relevance assignment is least
+among antitone assignments supporting the root demand, and determine
+whether the complexity guarantees of demand transformation and
+subsumptive tabling transfer to interface-indexed dynamic programs.
+\end{openproblem}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Local Search and Cost Terrains}
+\label{sec:terrain}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This payoff is the most speculative material in the document; in
+the outbound article it would be a closing vision section, or a
+separate paper.  Its role is to show that semantic interfaces
+organize not only exact optimization but heuristic search over the
+same problems.
+
+A \emph{cost terrain} is a graph whose points are complete
+realizations $\mathcal T(x_\star)$, with an edge between two points
+when a single local move transforms one into the other, and with the
+objective as elevation.  The key observation is that \emph{local
+moves are substitutions}: every practical move---a swap, a rotation,
+a 2-opt exchange---rewrites the current point $C[s]$ as $C[t]$ for
+some context $C\in\mathsf{Ctx}(x)$ and replacement
+$t\in\mathcal T(x)$.  Move sets restrict which goals $x$ and which
+replacements $t$ are eligible, but every move has this shape.  In
+the language of this document:
+
+\begin{quote}
+Every local-search operator is the replacement of one representative
+of a semantic interface by another.  Bellman-style optimization and
+local search use the same primitive operation.  One chooses globally
+optimal substitutions through sufficient interfaces; the other
+explores substitutions heuristically, one commitment at a time.
+\end{quote}
+
+\begin{lemma}[Substitution monotonicity; to be proved]
+\label{lem:terrain-mono}
+Under Bellman compatibility, replacing a piece $s$ by a
+continuation-equivalent piece $t$ with
+$\operatorname{cost}(t)\le\operatorname{cost}(s)$ never increases
+the total cost: $\operatorname{cost}(C[t])\le\operatorname{cost}(C[s])$
+for every accepting context $C$.  (Induct up the spine of $C$: at
+each composition the child interfaces agree, so admissibility is
+preserved, and the costs compare by monotonicity of the objective.)
+Consequently, a move that lowers a piece's cost can raise the total
+cost only by \emph{weakening the piece's interface}.
+\end{lemma}
+
+The lemma locates the source of ruggedness.  A greedy improver stuck
+short of the optimum---despite having improving pieces
+available---is stuck on an \emph{interface tradeoff}: a
+cheaper-but-weaker piece against a costlier-but-stronger one.  These
+are exactly the dominance-incomparable entries of a Pareto frontier;
+the branching antichains of the cost--interface frontier are the
+generators of the terrain's non-convexity.  If every goal's
+realizations carried a single interface, piecewise improvement would
+compose monotonically and the ridges would vanish.  In this precise
+sense, \emph{ruggedness is width made visible}: the notoriously
+rugged move terrains of the traveling salesperson problem and
+Held--Karp's exponential table (Example~\ref{ex:heldkarp}) are two
+symptoms of one underlying quantity.
+
+One distinction keeps the claim honest.  A point can be locally
+minimal for two different reasons: every available move loses on a
+cost--interface tradeoff, or the winning substitution simply lies
+outside the move set, as when a 2-opt local minimum is escaped by a
+3-opt move.  The first reason is intrinsic to the problem and is
+what the width analysis measures; the second is an artifact of
+search design, the classical concern of neighborhood
+exactness~\cite{papadimitriou1982combinatorial}, and our framework
+does not speak to it.
+
+\begin{remark}[Deferred commitment dissolves the terrain]
+A local search occupies one terrain point at a time, so at every
+interface tradeoff it makes an irrevocable commitment.  A
+frontier-indexed dynamic program instead carries, per goal, the
+entire cost--interface frontier: the discrete choice among
+incomparable pieces is deferred until the context that discriminates
+among them has been assembled.  This is an order-theoretic analogue
+of convexification: convexification enlarges a continuous search
+space until local optima disappear; the frontier lift enlarges the
+memo state until Bellman's principle holds.  Equivalently, one may
+keep the terrain---its points and moves unchanged---and lift the
+\emph{cost}: replace the scalar objective by a vector objective
+compared by dominance, from which the scalar is recovered by a fixed
+monotone aggregation.  We call this a \emph{cost lift}; its size is
+the number of cost dimensions.  Taking one coordinate per maximal
+interface---in the spirit of Ioannidis and Kang's analysis of query
+optimization terrains~\cite{ioannidis1991left}---the cost lift and
+the semantic lift become the same construction in different
+coordinates.
+\end{remark}
+
+\begin{remark}[Dimension as terrain smoothing]
+\label{rem:terrain-dim}
+The terrain gives the Bellman dimension
+(Definition~\ref{def:dimension}) a reading in the geometry of the
+cost surface itself, independent of any property vocabulary.  Call a
+cost lift \emph{smoothing} when dominance-descent by substitution
+never strands: from every suboptimal point, some move improves in
+the dominance order.  By Lemma~\ref{lem:terrain-mono}, interface
+tradeoffs are the only ridges, so smoothing requires exactly that
+every genuine tradeoff remain visible as an incomparability of
+lifted points rather than collapse into a scalar ridge.  Realizing a
+prescribed incomparability structure by dominance in $d$ scalar
+coordinates is precisely the classical \emph{order dimension} of
+Dushnik and Miller~\cite{dushnikmiller1941}.  We therefore expect
+the minimal smoothing dimension to be the order dimension of the
+forced-preference structure on continuation classes.  The Boolean
+dimension bounds it from above, since bundle labels embed the
+frontier in a Boolean lattice whose order dimension is exactly
+$|O|$; Sperner's theorem gives the counting form of the lower bound.
+The compositionality gap (Open Problem~\ref{open:gap}) thereby
+acquires a geometric face: the coordinates of a smoothing lift must
+be features that substitution respects, propagating through every
+composition, so the compositional dimension may exceed the order
+dimension, and by how much is the gap.
+\end{remark}
+
+\begin{remark}[Basin count is not dimension]
+It is tempting to conclude that dimension is a function of the
+number of basins in the terrain, but the two quantities are
+classically independent: posets of order dimension two already
+contain arbitrarily large antichains, so two coordinates can smooth
+a terrain with arbitrarily many mutually-ridged basins.  Moreover
+the basin count varies with the move set and the particular costs,
+which the order dimension does not.  The distinction is between
+counting and structure: basin count asks \emph{how many} tradeoffs
+the instance realizes, while dimension asks how the tradeoffs
+\emph{interlock}---whether every incomparability can be explained by
+the same two rankings disagreeing, or whether the incomparabilities
+force many mutually independent rankings, as in the standard
+examples of dimension theory~\cite{trotter1992}.
+\end{remark}
+
+\begin{openproblem}[Geometric dimension of a dynamic program]
+\label{open:geometric-dim}
+Make the smoothing picture precise.
+\begin{enumerate}
+\item \emph{Identify the relation.}  Order dimension realizes a
+  given partial order; our constraints prescribe certain
+  incomparabilities while leaving other comparabilities free.  The
+  quantity at stake is the minimum dimension over all partial orders
+  consistent with the constraints.  Define it, and determine whether
+  it coincides with a standard notion.
+\item \emph{Prove the sandwich.}  Conjecturally, the order dimension
+  of the forced structure is at most the compositional (Bellman)
+  dimension, which is at most $|O|$ for every sufficient vocabulary
+  $O$, with the first inequality strict exactly when
+  substitution-respecting coordinates cost more than unconstrained
+  ones (Open Problem~\ref{open:gap}).
+\item \emph{Settle the complexity.}  Deciding order dimension
+  $\le 2$ is polynomial; $\le 3$ is
+  NP-complete~\cite{yannakakis1982}.  Determine what this implies
+  for computing or approximating the Bellman dimension, and identify
+  tractable classes.
+\end{enumerate}
+\end{openproblem}
+
+Several bodies of literature meet here, and each offers something
+specific.  Dimension theory for finite posets~\cite{trotter1992}
+supplies lower-bound technology (critical pairs, the standard
+examples) that should transfer to Bellman dimension essentially
+unchanged.  The complexity theory of local
+search---PLS~\cite{johnson1988easy} and neighborhood
+exactness~\cite{papadimitriou1982combinatorial}---addresses how hard
+it is to \emph{find} local optima, where our width analysis
+addresses \emph{why} they exist; whether small width places a
+problem in a tractable fragment of PLS is, to our knowledge, open.
+Finally, the empirical landscape-analysis tradition in query
+optimization~\cite{ioannidis1991left} measured the shapes of real
+cost surfaces; width and dimension are candidate structural
+explanations for those measurements, and re-running such experiments
+with frontier-indexed state would test the theory.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Completion and Rewriting}
+\label{sec:completion}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This payoff is addressed to readers arriving from term rewriting
+rather than from query optimization.  In the outbound article it
+would extend the width story to a third community---after databases
+and e-graphs---and, as discussed below, it supplies a candidate
+algorithmic skeleton for the universality proof.  The claim is that
+Knuth--Bendix completion~\cite{knuthbendix1970,baadernipkow1998} is
+not an analogy for this framework but a corner of it: the width-one
+corner, degenerate in exactly the way that makes the rest of the
+theory legible.
+
+The core observation concerns reduction orders.  The defining
+requirement on a reduction order---closure under contexts,
+$s>t\Rightarrow C[s]>C[t]$---is verbatim the substitution
+monotonicity of Lemma~\ref{lem:terrain-mono}, demanded for
+\emph{every} context rather than derived for sufficient interfaces.
+
+\begin{quote}
+\emph{A reduction order is exactly a cost model for which Bellman
+compatibility holds at the coarsest possible interface.}
+\end{quote}
+
+Under such an objective every class has width one: no two contexts
+ever disagree about a pair of equivalent terms, so one canonical
+representative per class suffices and no refinement hierarchy is
+needed.  The Knuth--Bendix order itself makes the correspondence
+nearly literal: symbol weights summed over a term, with
+lexicographic tie-breaking, is an additive local cost
+(Section~\ref{sec:compositional-cost}) constrained to be
+context-monotone.
+
+The rest of the correspondence is worth recording entry by entry,
+because each entry suggests a theorem.
+
+\begin{itemize}
+
+\item
+\emph{A convergent rewriting system is a compositionally coherent
+canonicalization policy.}  Normal forms are closed under subterms,
+so the canonical representative of a class is assembled from
+canonical representatives of child classes: Bellman's principle for
+the order.
+
+\item
+\emph{Termination is well-foundedness.}  The reduction order
+certifies that induction is available, playing the role that
+acyclicity plays in this document; the fixed-point generalization of
+Section~\ref{sec:generalizations} corresponds to dropping
+termination, which is what saturation does.
+
+\item
+\emph{Local confluence is the local coherence test.}  Confluence
+guarantees that canonicalization is \emph{path}-independent; Bellman
+compatibility guarantees that it is \emph{context}-independent.
+Critical pairs are a finite local test for a global coherence
+property, via Newman's lemma~\cite{newman1942}---structurally the
+same move as testing the congruence condition e-node by e-node
+rather than realization by realization.
+
+\item
+\emph{A non-orientable equation is a dominance-incomparable pair.}
+When neither $s>t$ nor $t>s$ holds in all contexts, width greater
+than one is surfacing.  Classical completion fails here; unfailing
+completion~\cite{bachmair1989completion} keeps the equation and
+orients per instance---an ad hoc, runtime version of orienting per
+interface.  The multe-class machinery is the principled version:
+split the class by the contexts that disagree, and keep one
+canonical form per interface.
+
+\item
+\emph{Orientation decisions the order does not entail are
+determinations.}  When completion requires the user to choose an
+orientation, that is a semantic commitment beyond entailment---the
+boundary drawn at the end of Section~\ref{sec:generalizations},
+encountered in 1970 under a different name.  Rewriting modulo AC
+computes with the unorientable quotient rather than committing.
+
+\end{itemize}
+
+The terrain vocabulary of Section~\ref{sec:terrain} then sorts the
+traditions into three regimes of one theory.  A reduction order is
+precisely a cost function whose terrain has no ridges, so greedy
+substitution---which is what rewriting \emph{is}---cannot get stuck
+on an interface tradeoff, and confluence supplies the unique bottom:
+rewriting to normal form is local search that provably reaches the
+canonical element.  At small width, greedy substitution fails on
+interface tradeoffs, but a frontier-indexed dynamic program over a
+few interfaces per goal is exact: the Selinger regime.  At large or
+unknown width, equality
+saturation~\cite{tate2009equality,willsey2021egg} defers
+canonicalization entirely, keeping the whole class and extracting at
+the end.  Equality saturation's own origin story---as the
+non-destructive alternative to completion when orientation decisions
+are premature---is the deferred-commitment move taken to its limit.
+The multe-graph formalizes the middle regime, which is Selinger's:
+defer exactly the distinctions the future can observe, and no more.
+Neither rewriting tradition sits there---completion commits
+everything and saturation defers everything---so what the
+multe-graph offers rewriting is the middle discipline the database
+tradition has practiced all along.
+
+\begin{remark}[E-class analyses are labelings]
+egg's e-class analyses are the functional presentation
+(Remark~\ref{rem:presentations}) of multe-class labelings: an
+e-node's analysis value is computed from its child classes' values,
+a class's value is the join of its nodes' values, and the invariant
+is maintained monotonically under merges---semantic factorization
+plus join-semilattice structure, stated as a data-structure
+invariant.  What the multe-graph adds is making the analysis
+\emph{structural}: distinctions the analysis tracks become partition
+boundaries that extraction can index, rather than side information
+consulted by a cost function.  The familiar awkwardness of
+property-sensitive extraction in egg---retrofitting frontiers onto a
+one-best-term-per-class memo---is exactly the gap between carrying
+labels and carrying interfaces.
+\end{remark}
+
+\paragraph{Completion as preprocessing.}
+
+We believe the right way to operationalize the correspondence is to
+run completion as a preprocessing pass.  Given a rewrite theory and
+a reduction order compatible with the cost model, run ordered
+completion.  It returns a convergent system $R$ together with an
+unorientable residue $E$, and the two parts have different fates.
+
+\begin{enumerate}
+
+\item
+\emph{Normalize with $R$ eagerly.}  Within width-one territory a
+single representative is sufficient, so classes may be collapsed to
+their $R$-normal forms before any multe-graph is built: no frontier,
+no refinement hierarchy, no deferred commitment.
+
+\item
+\emph{Let $E$ localize the width.}  Every residue equation witnesses
+a pair that the order cannot separate uniformly across contexts---a
+candidate interface tradeoff.  Multe-class structure is needed only
+there.
+
+\item
+\emph{Build the multe-graph over normal forms modulo $E$.}  The
+interfaces to represent are the distinctions among $E$-equivalent
+normal forms that remaining contexts can observe.
+
+\end{enumerate}
+
+On this architecture, completion is a width detector and localizer:
+the convergent part of the theory is discharged by greedy rewriting,
+while saturation and frontier-indexed extraction are reserved for
+the residue, shrinking the e-graph before saturation begins.  This
+also softens the hedge of Section~\ref{sec:width}: completion does
+not choose a decomposition, but it improves the given one, rewriting
+it into a form as monotone as the objective permits and confining
+deferred commitment to the residue.  The
+interleaving has a familiar feel: egg already alternates saturation
+with congruence-based canonicalization (rebuilding); this adds
+canonicalization by oriented rules to the same loop.
+
+\begin{conjecture}[Completion measures width]
+\label{conj:completion-width}
+Over a ground-total reduction order, ordered completion succeeds
+with an empty unorientable residue if and only if every goal has
+width one under the order.  More generally, the distinctions that
+require multe-class structure in the instantiated graph are exactly
+those witnessed by residue equations, relative to the remaining
+contexts of the instance.
+\end{conjecture}
+
+The conjecture would make completion failure a complexity statement
+about the problem rather than a deficiency of the procedure---the
+same reframing that Proposition~\ref{prop:trivial} performs for
+Bellman sufficiency.
+
+Finally, the critical-pair mechanism suggests the proof strategy for
+Conjecture~\ref{conj:universality}.  Start from the coarsest
+quotient, the full class; find \emph{critical contexts} that
+distinguish members, the analogue of critical pairs; split the
+class; iterate to a fixed point.  The fixed point should be the
+continuation quotient.  This is Hopcroft-style partition refinement,
+which is exactly how Myhill--Nerode is proved constructively---so
+the completion connection is not merely an application of the
+framework but a candidate algorithm for its central theorem.
+
+\begin{openproblem}[Semantic completion]
+\label{open:completion}
+Define the completion procedure for semantic interfaces: critical
+contexts as the analogue of critical pairs, class splitting as the
+analogue of rule addition, termination and confluence of the
+refinement process itself, and identification of its fixed point
+with the continuation quotient.  Determine whether per-interface
+normal forms---one canonical form per surviving multe-class, with a
+critical-pair-style local coherence check across the refinement
+hierarchy---coincide with an existing notion in rewriting modulo a
+theory before coining a new one.
+\end{openproblem}
+
+\begin{remark}[Equality is not optimization]
+One caveat keeps the correspondence honest.  Completion decides
+equality; it is not natively an optimization procedure, and a normal
+form is canonical, not necessarily the minimum of its class under
+the (partial) reduction order.  The optimization reading tightens
+when the order is ground-total, as superposition-based theorem
+provers require.  The clean statement is therefore about
+canonicalization coherence, with the optimization statement as a
+corollary under ground-totality.
+\end{remark}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{A Dictionary for Readers from Programming Languages}
+\label{sec:types}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This closing subsection is a payoff of translation rather than of
+new results.  In the outbound article it might be compressed into a
+remark or a related-work discussion; we record it in full here
+because it names several of our central notions with terms of art
+that the programming-languages community has tested for
+decades---and because, in one important case, the standard
+vocabulary imports a warning we should heed.  The notation \(n:x\)
+of Section~\ref{sec:goals-enodes} already anticipates the reading.
+
+\begin{itemize}
+
+\item
+\emph{Goals are base types.}  The goal set \(X\) is a set of sorts;
+a composition signature \(d=(x\Rightarrow x_1,\ldots,x_k)\) is a
+constructor signature \(x_1\times\cdots\times x_k\to x\); e-nodes
+are constructors; realizations are closed well-typed terms; and
+\(\mathcal T(x)\) is the set of inhabitants of \(x\).  A concrete
+semantic schema is a multi-sorted signature, and its solution space
+is the term algebra.  Curry--Howard supplies the reading already
+gestured at in Section~\ref{sec:goals-enodes}: a goal is a
+proposition, realizations are its proofs, and extraction is
+cost-aware proof search.
+
+\item
+\emph{Multe-classes are refinement
+types}~\cite{freeman1991refinement}.  A multe-class is
+\(\{\nu:x\mid\varphi(\nu)\}\), a refinement of the base type by a
+semantic predicate, and the refinement hierarchy is a subtyping
+lattice: \([R]_{\mathsf{sorted}(a)}<:[R]_{\mathsf{any}}\).  Child
+references say that operators have refinement-typed signatures:
+merge join demands
+\([R]_{\mathsf{sorted}(a)}\times[S]_{\mathsf{sorted}(a)}\), while
+hash join demands only the base types.  Interesting orders are a
+refinement type system for physical plans.  Even the Cartesian-fiber
+condition translates: an e-node whose concrete fiber requires
+several rectangles is a constructor with an \emph{intersection
+type}, one arrow per rectangle---so the size of the intersection is
+the rectangle cover number of Remark~\ref{rem:rectangles}.
+
+\item
+\emph{Requirements are type ascriptions, and instantiation is
+bidirectional type checking}~\cite{dunfield2021bidirectional}.  The
+root requirement is an annotation at the root; liveness pushes
+demanded types downward (checking mode); realizability synthesizes
+provided types upward (synthesis mode); and the instantiated
+multe-graph is what a bidirectional checker materializes.  This sits
+beside the demand-transformation reading of
+Section~\ref{sec:demand}: bidirectional typing and magic sets are
+cousins.
+
+\item
+\emph{Continuation equivalence is contextual
+equivalence}~\cite{morris1969}.
+Definition~\ref{def:continuation} is Morris-style observational
+equivalence: no program context can distinguish the terms.
+Consequently, a Bellman-sufficient labeling is an \emph{adequate}
+semantics, and an exact labeling is a \emph{fully abstract} one.
+
+\end{itemize}
+
+\begin{remark}[Full abstraction, and why we expect theorems]
+The last identification restates the central conjectures in famous
+words: Conjectures~\ref{conj:minimality}
+and~\ref{conj:universality} assert that \emph{the fully abstract
+model exists, is compositional, and is effectively presentable}.
+The history of full abstraction for PCF~\cite{plotkin1977} supplies
+the warning: the fully abstract model always exists
+abstractly---quotient the term model, which is exactly
+\(K_x\)---yet it can resist any syntax-independent, finitely
+presented description for decades.  Our conjectures are precisely
+the demand for a good presentation: a finite property vocabulary
+with compositional transfer maps.  The reason to expect theorems
+rather than a research program is that our setting is finite and
+first-order---no higher-order functions, no divergence---which is
+the regime in which full abstraction is tractable.  This observation
+belongs in the outbound article: it preempts the obvious skeptical
+question from readers who know the PCF story.
+\end{remark}
+
+The dictionary also imports proof technology.  The main obligation
+of Conjecture~\ref{conj:universality} is that contextual equivalence
+be a congruence---that composition descends to the quotients---and
+the standard technique is Howe's method~\cite{howe1996proving}; in
+our finite, first-order setting it should reduce to the partition
+refinement already proposed as semantic completion
+(Open Problem~\ref{open:completion}).  Finally, canonicalization
+through a sufficient interface is recognizably normalization by
+evaluation~\cite{berger1991inverse}: compute in the semantic model,
+then read back the canonical form.  We take the density of these
+correspondences as evidence that the framework is carving at known
+joints.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{thebibliography}{9}
+
+\bibitem{selinger1979access}
+P.~Griffiths Selinger, M.~M. Astrahan, D.~D. Chamberlin, R.~A. Lorie,
+and T.~G. Price.
+\newblock Access path selection in a relational database management
+system.
+\newblock In \emph{SIGMOD}, 1979.
+
+\bibitem{heldkarp1962}
+M.~Held and R.~M. Karp.
+\newblock A dynamic programming approach to sequencing problems.
+\newblock \emph{J. SIAM}, 10(1), 1962.
+
+\bibitem{graefe1995cascades}
+G.~Graefe.
+\newblock The Cascades framework for query optimization.
+\newblock \emph{IEEE Data Eng. Bull.}, 18(3), 1995.
+
+\bibitem{willsey2021egg}
+M.~Willsey, C.~Nandi, Y.~R. Wang, O.~Flatt, Z.~Tatlock, and
+P.~Panchekha.
+\newblock egg: Fast and extensible equality saturation.
+\newblock \emph{Proc. ACM Program. Lang.}, 5(POPL), 2021.
+
+\bibitem{bancilhon1986magic}
+F.~Bancilhon, D.~Maier, Y.~Sagiv, and J.~D. Ullman.
+\newblock Magic sets and other strange ways to implement logic
+programs.
+\newblock In \emph{PODS}, 1986.
+
+\bibitem{tekle2011subsumptive}
+K.~T. Tekle and Y.~A. Liu.
+\newblock More efficient datalog queries: Subsumptive tabling beats
+magic sets.
+\newblock In \emph{SIGMOD}, 2011.
+
+\bibitem{condie2008evita}
+T.~Condie, D.~Chu, J.~M. Hellerstein, and P.~Maniatis.
+\newblock Evita Raced: Metacompilation for declarative networks.
+\newblock \emph{Proc. VLDB Endow.}, 1(1), 2008.
+
+\bibitem{ioannidis1991left}
+Y.~E. Ioannidis and Y.~C. Kang.
+\newblock Left-deep vs. bushy trees: An analysis of strategy spaces
+and its implications for query optimization.
+\newblock In \emph{SIGMOD}, 1991.
+
+\bibitem{dushnikmiller1941}
+B.~Dushnik and E.~W. Miller.
+\newblock Partially ordered sets.
+\newblock \emph{American Journal of Mathematics}, 63(3), 1941.
+
+\bibitem{trotter1992}
+W.~T. Trotter.
+\newblock \emph{Combinatorics and Partially Ordered Sets: Dimension
+Theory}.
+\newblock Johns Hopkins University Press, 1992.
+
+\bibitem{yannakakis1982}
+M.~Yannakakis.
+\newblock The complexity of the partial order dimension problem.
+\newblock \emph{SIAM J. Algebraic Discrete Methods}, 3(3), 1982.
+
+\bibitem{johnson1988easy}
+D.~S. Johnson, C.~H. Papadimitriou, and M.~Yannakakis.
+\newblock How easy is local search?
+\newblock \emph{J. Comput. Syst. Sci.}, 37(1), 1988.
+
+\bibitem{papadimitriou1982combinatorial}
+C.~H. Papadimitriou and K.~Steiglitz.
+\newblock \emph{Combinatorial Optimization: Algorithms and
+Complexity}.
+\newblock Prentice-Hall, 1982.
+
+\bibitem{knuthbendix1970}
+D.~E. Knuth and P.~B. Bendix.
+\newblock Simple word problems in universal algebras.
+\newblock In \emph{Computational Problems in Abstract Algebra},
+Pergamon Press, 1970.
+
+\bibitem{newman1942}
+M.~H.~A. Newman.
+\newblock On theories with a combinatorial definition of
+``equivalence''.
+\newblock \emph{Annals of Mathematics}, 43(2), 1942.
+
+\bibitem{bachmair1989completion}
+L.~Bachmair, N.~Dershowitz, and D.~A. Plaisted.
+\newblock Completion without failure.
+\newblock In \emph{Resolution of Equations in Algebraic Structures},
+volume~2, Academic Press, 1989.
+
+\bibitem{baadernipkow1998}
+F.~Baader and T.~Nipkow.
+\newblock \emph{Term Rewriting and All That}.
+\newblock Cambridge University Press, 1998.
+
+\bibitem{tate2009equality}
+R.~Tate, M.~Stepp, Z.~Tatlock, and S.~Lerner.
+\newblock Equality saturation: A new approach to optimization.
+\newblock In \emph{POPL}, 2009.
+
+\bibitem{morris1969}
+J.~H. Morris.
+\newblock \emph{Lambda-Calculus Models of Programming Languages}.
+\newblock PhD thesis, MIT, 1969.
+
+\bibitem{plotkin1977}
+G.~D. Plotkin.
+\newblock LCF considered as a programming language.
+\newblock \emph{Theoretical Computer Science}, 5(3), 1977.
+
+\bibitem{freeman1991refinement}
+T.~Freeman and F.~Pfenning.
+\newblock Refinement types for ML.
+\newblock In \emph{PLDI}, 1991.
+
+\bibitem{dunfield2021bidirectional}
+J.~Dunfield and N.~Krishnaswami.
+\newblock Bidirectional typing.
+\newblock \emph{ACM Computing Surveys}, 54(5), 2021.
+
+\bibitem{howe1996proving}
+D.~J. Howe.
+\newblock Proving congruence of bisimulation in functional
+programming languages.
+\newblock \emph{Information and Computation}, 124(2), 1996.
+
+\bibitem{berger1991inverse}
+U.~Berger and H.~Schwichtenberg.
+\newblock An inverse of the evaluation functional for typed
+$\lambda$-calculus.
+\newblock In \emph{LICS}, 1991.
+
+\end{thebibliography}
 
 \end{document}
